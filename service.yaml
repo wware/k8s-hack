@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: toy-api
+spec:
+  # NodePort so the host can reach the API at <minikube ip>:<allocated port>
+  # without a port-forward. No explicit nodePort -- the API server picks one
+  # from 30000-32767; read it back with `kubectl get svc toy-api`.
+  type: NodePort
+  selector:
+    app: toy-api
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http

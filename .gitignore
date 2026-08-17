@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# uv / virtualenv
+.venv/
+
+# Pulumi
+k8s-exercise/pulumi/venv/
+Pulumi.*.yaml
+!Pulumi.yaml
+
+# Local Claude Code settings
+.claude/settings.local.json
+
+# macOS
+.DS_Store
+
+# Docker Compose local env
+.env
+.env.*
+!.env.example

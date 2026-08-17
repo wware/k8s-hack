@@ -1,0 +1,17 @@
+[user]
+    email = wware@alum.mit.edu
+    name = Will Ware
+    useConfigOnly = true
+
+[alias]
+    lp = log --all --color --graph -p --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
+    lg = log --all --color --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
+    lm = log --color --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
+    la = log --all --color --graph --name-only --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
+    ln = log --color --name-only --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
+    lgp = "!git --no-pager lg | less -p \"$1\" #"
+    s = status
+
+[core]
+    pager = less -FRSX
+    sshCommand = ssh -i /root/.ssh/ww_id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes

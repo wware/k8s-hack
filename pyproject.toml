@@ -1,0 +1,30 @@
+[project]
+name = "k8s-toy-api"
+version = "0.1.0"
+description = "Simple toy API for Kubernetes exercise"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "prometheus-fastapi-instrumentator>=7.0",
+    "asyncpg>=0.30",
+    "pydantic-settings>=2.0",
+]
+
+[dependency-groups]
+dev = [
+    "black>=26.5.1",
+    "mypy>=2.3.0",
+    "pytest>=9.1.1",
+    "ruff>=0.15.21",
+]
+
+[tool.black]
+target-version = ["py312"]
+
+[tool.mypy]
+strict = true
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+addopts = "--strict-markers"

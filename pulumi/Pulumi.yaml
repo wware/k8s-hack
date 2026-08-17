@@ -1,0 +1,8 @@
+name: graph-api
+runtime:
+  name: python
+  options:
+    virtualenv: venv
+description: >-
+  Pulumi (Python) port of ../configmap.yaml + ../deployment.yaml +
+  ../service.yaml -- a code-first alternative to hand-written YAML / Helm.
