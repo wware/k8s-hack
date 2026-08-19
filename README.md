@@ -1,6 +1,6 @@
 # K8s Toy API
 
-A simple FastAPI application for learning Kubernetes deployment with docker-compose, plain Kubernetes manifests, and Pulumi.
+A simple FastAPI application for learning Kubernetes deployment with plain Kubernetes manifests and Pulumi.
 
 ## The API
 
@@ -21,9 +21,22 @@ A minimal REST API with:
 - `DELETE /api/v1/items/{item_id}` - Delete an item
 - `GET /metrics` - Prometheus metrics
 
-## Local Development
+## Quick Start
 
-### With Docker Compose (Recommended)
+Get started with Kubernetes in one command:
+
+```bash
+# One-command deployment and testing (requires Minikube)
+./start.sh
+```
+
+This is the recommended first interaction - it shows you Kubernetes in action immediately.
+
+## Alternative: Local Development
+
+### With Docker Compose
+
+For understanding the application architecture without Kubernetes:
 
 ```bash
 # Start PostgreSQL and the API
@@ -61,6 +74,10 @@ curl http://localhost:8000/api/v1/items
 
 ## Kubernetes (plain manifests)
 
+### Understanding the Deployment
+
+The `start.sh` script (recommended above) handles everything automatically. For manual deployment or using other clusters (kind, etc.):
+
 ```bash
 # Build the image
 docker build -t k8s-toy-api:local .
@@ -70,8 +87,9 @@ kind load docker-image k8s-toy-api:local
 # OR: minikube image load k8s-toy-api:local
 
 # Deploy database first
-kubectl apply -f postgres-secret.yaml
-kubectl apply -f postgres-pvc.yaml
+kubectl apply -f postgres-configmap.yaml  # Non-sensitive config
+kubectl apply -f postgres-secret.yaml     # Sensitive credentials
+kubectl apply -f postgres-pvc.yaml        # Persistent storage
 kubectl apply -f postgres-statefulset.yaml
 kubectl apply -f postgres-service.yaml
 
@@ -93,19 +111,28 @@ curl http://localhost:8000/api/v1/items
 
 # OR test via NodePort (minikube)
 curl "$(minikube service toy-api --url)/api/v1/items"
+
+# Run comprehensive tests
+./test-api.sh
 ```
 
 ### Understanding the manifests
 
 **Database:**
-- **`postgres-secret.yaml`** - Database credentials (use proper secrets management in production)
+- **`postgres-configmap.yaml`** - Non-sensitive configuration (host, port, database name, user)
+- **`postgres-secret.yaml`** - Sensitive credentials (password only - best practice)
 - **`postgres-pvc.yaml`** - PersistentVolumeClaim for database storage (survives pod restarts)
 - **`postgres-statefulset.yaml`** - StatefulSet for PostgreSQL (stable identity, persistent storage)
 - **`postgres-service.yaml`** - Headless Service for StatefulSet DNS
 
 **API:**
 - **`deployment.yaml`** - API deployment (2 replicas, health probes, resource limits)
+  - Constructs `DATABASE_URL` from ConfigMap + Secret components
 - **`service.yaml`** - NodePort service for external access
+
+**Automation:**
+- **`start.sh`** - One-command deployment script (build, load, deploy, test)
+- **`test-api.sh`** - Comprehensive API test suite (CRUD operations + error handling)
 
 See the inline comments in each file for more details.
 
@@ -179,15 +206,23 @@ kubectl get nodes
 
 ### Quick Test
 
-Once your cluster is running, test the deployment:
+Once your cluster is running, use the automated script:
+
+```bash
+# One-command deployment and testing (recommended for minikube)
+./start.sh
+```
+
+Or manually for kind/other clusters:
 
 ```bash
 # Build and load the image
 docker build -t k8s-toy-api:local .
-minikube image load k8s-toy-api:local  # or: kind load docker-image k8s-toy-api:local
+kind load docker-image k8s-toy-api:local  # or: minikube image load k8s-toy-api:local
 
 # Deploy everything
-kubectl apply -f postgres-secret.yaml -f postgres-pvc.yaml -f postgres-statefulset.yaml -f postgres-service.yaml
+kubectl apply -f postgres-configmap.yaml -f postgres-secret.yaml -f postgres-pvc.yaml
+kubectl apply -f postgres-statefulset.yaml -f postgres-service.yaml
 kubectl apply -f deployment.yaml -f service.yaml
 
 # Wait for pods
@@ -197,6 +232,9 @@ kubectl wait --for=condition=ready pod -l app=toy-api --timeout=60s
 # Test the API
 kubectl port-forward svc/toy-api 8000:8000 &
 sleep 2
+./test-api.sh
+
+# Or test manually
 curl http://localhost:8000/api/v1/items
 curl http://localhost:8000/api/v1/healthz
 ```

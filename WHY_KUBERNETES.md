@@ -1,5 +1,24 @@
 # Kubernetes: What It Is and Why It Exists
 
+## TL;DR: When Should You Use Kubernetes?
+
+**Use Kubernetes if you have:**
+- Multiple machines / need horizontal scaling
+- Zero-downtime deployment requirements
+- Workloads that must survive hardware failures
+- Multiple teams deploying to shared infrastructure
+- Need for autoscaling based on load
+
+**Don't use Kubernetes if:**
+- Your app fits on one server
+- Docker Compose meets your needs
+- You're a solo developer with simple deployment needs
+- Operational complexity outweighs benefits
+
+**This repository** demonstrates a minimal production-ready setup with PostgreSQL, structured logging, and Prometheus metrics. See `deployment.yaml`, `postgres-statefulset.yaml`, and `service.yaml` for working examples.
+
+---
+
 ## 1. What Kubernetes Actually Is
 
 Kubernetes (K8s) is a **distributed control system for running containers across a fleet of machines**. That's a more useful definition than "container orchestrator," because the orchestration part is really just the visible symptom of the underlying design: Kubernetes is fundamentally a *reconciliation engine*. You tell it what you want the world to look like (desired state), and a set of independent control loops continuously work to make reality match that description (actual state). Everything else — pods, services, deployments, autoscaling — is built on top of that one idea.
@@ -138,7 +157,36 @@ The Kubernetes API itself is standardized (that's the point of the CNCF conforma
 - **`kubectl apply` is not transactional** across multiple objects — partial failures during a multi-resource apply are a real operational hazard, which is part of why GitOps tools (ArgoCD, Flux) with reconciliation loops of their own have become the standard deployment pattern rather than raw `kubectl apply` from CI.
 - **etcd is the single point of catastrophic failure** for a cluster — it's why managed control planes (all three clouds) are worth the money for anything beyond a learning cluster; running your own HA etcd correctly is genuinely hard.
 
-## 8. GitOps: Git as the Source of Truth
+## 7.5 The Database Problem: StatefulSet Is Necessary But Not Sufficient
+
+Everything elegant about Kubernetes rests on one assumption: pods are interchangeable and disposable. A dead stateless pod gets replaced, rejoins the Service pool, and nothing cares that it's a *different* pod. Databases break that assumption at the root — the data is the reality that matters,
+not the process, and rescheduling the pod doesn't converge anything.
+
+**StatefulSet fixes exactly three things**, and stops there:
+
+- **Stable identity** — `db-0`, `db-1`, `db-2` instead of random names, kept across restarts
+- **Stable storage** — each ordinal keeps its own PVC across rescheduling
+- **Ordered startup/shutdown** — useful for clustering software that bootstraps from a known node
+
+That's the whole feature set. It has no opinion on replication, failover, consistency, or backups. Concretely, a bare StatefulSet does **not**:
+
+1. **Orchestrate failover.** If the primary dies, K8s reschedules the pod — it has no idea a replica needs promoting, connections need rerouting, or the old primary needs to rejoin as a replica once it's back.
+2. **Prevent split-brain.** A network partition plus a naive promotion can leave two pods both accepting writes. This needs quorum-aware logic (Raft/Paxos-style) or fencing, not "restart the pod."
+3. **Take backups or do point-in-time recovery.** Nothing schedules base backups or ships WAL/binlog by default.
+4. **Handle major version upgrades**, which often need specific tooling (`pg_upgrade`) and sequencing across primary/replicas, not just a bumped image tag.
+5. **Alert on database-specific failure modes** (replication lag, WAL buildup) rather than generic pod health.
+
+**Operators close this gap.** An Operator (CloudNativePG, Zalando Postgres Operator, Crunchy Data) is the same control-loop pattern from §2.2, one layer up: instead of reconciling "N pods with N volumes," it reconciles "a healthy Postgres cluster," using StatefulSet as its primitive underneath. This is the payoff of the CRD/controller extensibility mentioned in §2.3 — it's how domain-specific operational knowledge (a DBA's runbook) gets encoded as software.
+
+**Decision order, roughly by operational burden:**
+
+1. **Managed service** (RDS, Cloud SQL, Azure Database) — the database doesn't run in K8s at all; the cloud provider is the Operator. Right default for most teams.
+2. **In-cluster Operator** — only when you have a real reason to keep data in-cluster (locality, cost, air-gapped, multi-tenant self-service).
+3. **Bare StatefulSet** — defensible only for genuinely disposable state (a Redis cache you're fine losing) or, as here, a learning exercise — not real production data.
+
+The etcd gotcha in §7 is this same problem in the wild: etcd needs quorum and leader election with zero split-brain tolerance, which is exactly why nobody hand-rolls their own HA etcd — they use a managed control plane or a purpose-built operator, for the reasons above.
+
+## 9. GitOps: Git as the Source of Truth
 
 GitOps is really just Kubernetes' own control-loop idea, extended one level up the stack — and that's exactly why it fits so naturally. This is the answer to the gotcha flagged in section 7 — `kubectl apply` isn't transactional and has no memory of what should be true. GitOps is the ecosystem's answer: move the source of truth to something versioned, reviewable, and diff-able, and let a controller do continuously what `kubectl apply` only does once, on-demand, by a human who might forget.
 
@@ -183,3 +231,50 @@ The drift detection point is the one people underestimate: in a push model, the 
 - **App-of-apps / multi-tenancy** — a repo structure where one root manifest fans out to many teams'/services' manifests, so a platform team can manage cluster-wide policy while app teams own their own subtrees.
 - **Progressive delivery hooks** — integration with Argo Rollouts / Flagger for canary or blue-green rollouts driven by the same git-triggered reconciliation, with automatic rollback on metric regressions.
 - **Multi-cluster fleets** — one GitOps controller (or one control plane like Argo CD's) can manage many clusters, each pointed at its own path/branch in the same repo, which is how "promote through dev → staging → prod" often gets modeled as a PR moving a change between directories.
+
+## 9. Hands-On Learning Path
+
+Now that you understand the "why," here's how to actually learn Kubernetes:
+
+### Start Here (This Repository)
+1. **Run the quick test** from the README - deploy PostgreSQL + API to minikube/kind
+2. **Examine the manifests** - `deployment.yaml`, `postgres-statefulset.yaml`, `service.yaml`
+3. **Watch the reconciliation loop** - `kubectl get pods -w`, delete a pod, watch it recreate
+4. **Check the logs** - `kubectl logs -l app=toy-api` to see structured JSON logging
+5. **Scale it** - `kubectl scale deployment/toy-api --replicas=5`, watch load balancing
+
+### Core Concepts to Master (in order)
+1. **Pods** - The atomic unit (create one manually, see it die when you delete the node)
+2. **Deployments** - Declarative updates (change the image tag, watch the rolling update)
+3. **Services** - Stable networking (see how service IPs don't change even as pods come/go)
+4. **ConfigMaps / Secrets** - Externalized config (change a ConfigMap, redeploy, see new values)
+5. **PersistentVolumes** - StatefulSets (examine `postgres-statefulset.yaml` in this repo)
+6. **Namespaces** - Multi-tenancy (create two namespaces, deploy the same app twice)
+
+### Next Steps
+- **Add monitoring** - Follow `LOGGING.md` to deploy Loki + Grafana
+- **Add auth** - Follow `AUTH.md` to add JWT or OAuth2
+- **Helm** - Package this app as a Helm chart for reusability
+- **GitOps** - Deploy ArgoCD, point it at this repo, see it sync changes
+- **Autoscaling** - Add HorizontalPodAutoscaler based on CPU or custom metrics
+- **Multi-cluster** - Run the same manifests on EKS, GKE, and AKS to see portability
+
+### Essential Resources
+- [Official Kubernetes Tutorial](https://kubernetes.io/docs/tutorials/) - Interactive browser-based labs
+- [Kubernetes The Hard Way](https://github.com/kelseyhightower/kubernetes-the-hard-way) - Build a cluster from scratch to understand all components
+- [CNCF Landscape](https://landscape.cncf.io/) - The overwhelming ecosystem map (come back to this later)
+- [Kubernetes Patterns](https://k8spatterns.io/) - Common design patterns for apps on K8s
+
+### Common Mistakes to Avoid
+- Don't run **production** databases with just a StatefulSet - use an **Operator** instead
+  - K8s handles pod/node failures and persistent storage (what this repo demonstrates)
+  - K8s does NOT automatically handle: backups, point-in-time recovery, HA/replication, major version upgrades, monitoring
+  - For production: use **CloudNativePG**, **Zalando Postgres Operator**, or **Crunchy Data Operator** - these add the missing operational pieces on top of the StatefulSet foundation
+  - Or use a managed database (RDS, Cloud SQL, Azure Database) and let K8s apps connect to it
+- Don't use `latest` image tags in production (defeats declarative deployment)
+- Don't skip resource requests/limits (the scheduler can't place pods without them)
+- Don't expose the API server to the internet (use a bastion or VPN)
+- Don't store secrets in git unencrypted (use SealedSecrets, External Secrets, or a secrets manager)
+
+The key to learning Kubernetes is to **start small** (this repo), **break things intentionally** (kill pods, delete nodes), and **watch the reconciliation loops** bring it back. The system is self-healing by design - trust that, and experiment freely.
+

@@ -20,6 +20,10 @@ spec:
             - containerPort: 5432
               name: postgres
           envFrom:
+            # Load non-sensitive config from ConfigMap
+            - configMapRef:
+                name: postgres-config
+            # Load sensitive data from Secret
             - secretRef:
                 name: postgres-secret
           volumeMounts:
