@@ -188,13 +188,11 @@ The etcd gotcha in §7 is this same problem in the wild: etcd needs quorum and l
 
 ## 9. GitOps: Git as the Source of Truth
 
-GitOps is really just Kubernetes' own control-loop idea, extended one level up the stack — and that's exactly why it fits so naturally. This is the answer to the gotcha flagged in section 7 — `kubectl apply` isn't transactional and has no memory of what should be true. GitOps is the ecosystem's answer: move the source of truth to something versioned, reviewable, and diff-able, and let a controller do continuously what `kubectl apply` only does once, on-demand, by a human who might forget.
+GitOps is really just Kubernetes' own control-loop idea, extended one level up the stack. This is the answer to the gotcha flagged in section 7 — `kubectl apply` isn't transactional and has no memory of what should be true. GitOps is the ecosystem's answer: move the source of truth to git, and let a controller continuously reconcile the cluster to match it.
 
 ### The core idea
 
 Recall the reconciliation pattern: a controller watches desired state, compares it to actual state, and acts to close the gap. GitOps applies that same pattern, but changes *where the desired state lives*. Instead of desired state living only in "whatever's currently in the API server / etcd," it lives in a **git repository** — YAML manifests (or Helm charts, or Kustomize overlays) committed like code. A controller running *inside the cluster* continuously watches that repo and reconciles the live cluster to match it.
-
-So the mental model becomes:
 
 ```
 git repo (desired state, versioned, reviewed)
@@ -204,35 +202,23 @@ GitOps controller in-cluster (ArgoCD / Flux)
 Live cluster state
 ```
 
-### Why this fits Kubernetes specifically (and not, say, a pile of servers you SSH into)
+**Key architectural insight**: All the active machinery lives in the Kubernetes cluster—the git server is just passive storage. The GitOps controller polls git, compares what it finds to the cluster state, and applies changes. Git doesn't know Kubernetes exists; it's just serving files when asked.
 
-- **Everything is already declarative YAML.** A Deployment manifest describes an end state, not a sequence of steps — so "the end state lives in git" is a small conceptual jump, not a paradigm shift. You can't meaningfully GitOps a bash deploy script the same way, because there's no idempotent "current state" to diff against.
-- **The API server already exposes the mechanism for watching/diffing.** ArgoCD and Flux aren't inventing anything new — they're just another controller in the pattern from section 2.2 of the doc, watching an external source (git) instead of another API object.
-- **Rollback is trivial and meaningful.** Because state is fully described declaratively, `git revert` + a resync *is* a rollback. Compare that to imperative infrastructure where "rollback" often means someone remembering what they typed.
+### Why this fits Kubernetes specifically
 
-### Pull vs. push — the important architectural distinction
+- **Everything is already declarative YAML.** A Deployment manifest describes an end state, not a sequence of steps — so "the end state lives in git" is a small conceptual jump, not a paradigm shift.
+- **The API server already exposes the mechanism for watching/diffing.** ArgoCD and Flux are just another controller following the pattern from section 2.2, watching an external source (git) instead of another API object.
+- **Rollback is trivial.** Because state is fully described declaratively, `git revert` + a resync *is* a rollback.
 
-Traditional CI/CD is **push-based**: your CI pipeline has cluster credentials and runs `kubectl apply` or `helm upgrade` from outside the cluster. GitOps flips this to **pull-based**: the controller lives inside the cluster and pulls from git — nothing outside the cluster needs write access to it at all.
+### Pull vs. push — the security and operational difference
 
-This matters more than it sounds:
+Traditional CI/CD is **push-based**: your CI pipeline has cluster credentials and runs `kubectl apply` from outside. GitOps flips this to **pull-based**: the controller lives inside the cluster and pulls from git — nothing outside the cluster needs write access.
 
-| | Push (traditional CI/CD) | Pull (GitOps) |
-|---|---|---|
-| Who needs cluster credentials | CI system (external) | Nobody external — controller is in-cluster |
-| Drift detection | None — if someone runs `kubectl edit` by hand, CI never finds out | Continuous — controller notices and reverts, or flags it |
-| Blast radius of a leaked CI credential | Full cluster access | None (no external write path exists) |
-| Multi-cluster fan-out | Separate pipeline logic per cluster | Same controller pattern, just pointed at more repos/clusters |
+**Drift detection** is the killer feature: in a push model, the cluster's actual state and git can silently diverge forever (someone does a manual hotfix during an incident and never backports it). In a pull model, the controller *keeps re-asserting* git as truth on every reconcile cycle (typically every few minutes), so drift either gets auto-corrected or surfaced as an alert.
 
-The drift detection point is the one people underestimate: in a push model, the cluster's actual state and git can silently diverge forever (someone does a manual hotfix during an incident and never backports it). In a pull model, the controller *keeps re-asserting* git as truth on every reconcile cycle (typically every few minutes), so drift either gets auto-corrected or surfaced as an alert, depending on config.
+**For a deeper dive** — including where the active machinery lives, ArgoCD vs Flux, secrets management, bootstrapping, and hands-on setup — see **[GITOPS.md](GITOPS.md)**.
 
-### What ArgoCD / Flux actually add on top of "watch git, apply"
-
-- **Diffing and visualization** — ArgoCD's UI shows you exactly what's out of sync between git and the live cluster before it acts (or you can require manual sync approval).
-- **App-of-apps / multi-tenancy** — a repo structure where one root manifest fans out to many teams'/services' manifests, so a platform team can manage cluster-wide policy while app teams own their own subtrees.
-- **Progressive delivery hooks** — integration with Argo Rollouts / Flagger for canary or blue-green rollouts driven by the same git-triggered reconciliation, with automatic rollback on metric regressions.
-- **Multi-cluster fleets** — one GitOps controller (or one control plane like Argo CD's) can manage many clusters, each pointed at its own path/branch in the same repo, which is how "promote through dev → staging → prod" often gets modeled as a PR moving a change between directories.
-
-## 9. Hands-On Learning Path
+## 10. Hands-On Learning Path
 
 Now that you understand the "why," here's how to actually learn Kubernetes:
 
