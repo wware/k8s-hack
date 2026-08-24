@@ -2,6 +2,103 @@
 
 A simple FastAPI application for learning Kubernetes deployment with plain Kubernetes manifests and Pulumi.
 
+---
+
+## Learning Track: Kubernetes Fundamentals
+
+**Goal:** Understand how Kubernetes works by deploying a real application with a database.
+
+**Time:** 2-3 hours total | **Prerequisites:** Docker installed
+
+### Quick Start (Recommended First Step)
+
+**Do:** Run `./start.sh` and watch what happens
+**Insight:** Kubernetes isn't magic—it's containers + orchestration. The script shows you deployment, health checks, and service discovery in 2 minutes.
+**Verify:** Visit `http://localhost:8000/docs` and see the API running
+**Time:** 5 minutes
+
+---
+
+### Track A: Core Concepts (Linear Path)
+
+#### 1. Docker Compose Baseline
+**Do:** `docker compose up` and explore the API
+**Insight:** Before Kubernetes, understand the application itself. Two containers (API + PostgreSQL) talking to each other.
+**Verify:** CRUD operations work at `/docs`, database persists data
+**Time:** 15 minutes
+**Why this matters:** You need to know what you're deploying before learning *how* to deploy it.
+
+#### 2. Deploy to Kubernetes (Manual)
+**Do:** Follow "Kubernetes (plain manifests)" section—deploy PostgreSQL first, then API
+**Insight:** Kubernetes separation of concerns: ConfigMaps (config), Secrets (credentials), StatefulSets (databases), Deployments (stateless apps)
+**Verify:** `kubectl get pods` shows running pods, `kubectl port-forward` lets you access the API
+**Time:** 30 minutes
+**Going deeper:** Read inline comments in each YAML manifest
+
+#### 3. Self-Healing
+**Do:** `kubectl delete pod <api-pod-name>` and watch Kubernetes recreate it
+**Insight:** Declarative systems maintain desired state. You said "2 replicas," Kubernetes ensures 2 replicas always exist.
+**Verify:** `kubectl get pods -w` shows new pod spinning up immediately
+**Time:** 5 minutes
+**Try also:** Delete the PostgreSQL pod—StatefulSet recreates it with the same identity and storage
+
+#### 4. Scaling
+**Do:** `kubectl scale deployment/toy-api --replicas=5`
+**Insight:** Horizontal scaling is trivial for stateless apps. Database scaling is hard (hence StatefulSet vs Deployment).
+**Verify:** `kubectl get pods` shows 5 API pods, all sharing the same database
+**Time:** 5 minutes
+**Going deeper:** Send requests, watch them load-balance across pods (`kubectl logs -f <pod-name>`)
+
+#### 5. Configuration Management
+**Do:** Edit `postgres-configmap.yaml` to change database name, `kubectl apply -f`, restart pods
+**Insight:** Config lives outside containers. Change config without rebuilding images.
+**Verify:** Pods pick up new DATABASE_URL from ConfigMap + Secret
+**Time:** 15 minutes
+**Going deeper:** Try `kubectl exec` to shell into a pod and see environment variables
+
+#### 6. Persistent Storage
+**Do:** Delete PostgreSQL pod, verify data survived
+**Insight:** PersistentVolumeClaims decouple storage from pod lifecycle. Database survives restarts.
+**Verify:** `kubectl get pvc` shows bound volume, data still there after pod deletion
+**Time:** 10 minutes
+**Going deeper:** [WHY_KUBERNETES.md](WHY_KUBERNETES.md) explains when persistence matters
+
+---
+
+### Track B: Infrastructure as Code (Alternative)
+
+**For developers who prefer Python to YAML:**
+
+#### 1-3. Same as Track A (understand the app first)
+
+#### 4. Pulumi Deployment
+**Do:** Follow "Pulumi" section—deploy with `pulumi up`
+**Insight:** Same resources, different syntax. YAML is declarative, but Pulumi adds type checking and reusability.
+**Verify:** `pulumi stack output base_url` shows the API URL
+**Time:** 30 minutes
+**When to use:** Multi-environment deployments, shared modules, CI/CD pipelines
+
+---
+
+### Next Steps
+
+Once you've completed either track:
+
+**Continue learning here (k8s-hack):**
+- [WHY_KUBERNETES.md](WHY_KUBERNETES.md) - When (and when not) to use Kubernetes
+- [LOGGING.md](LOGGING.md) - Structured logging and log aggregation
+- [AUTH.md](AUTH.md) - Authentication and authorization patterns
+- [GITOPS.md](GITOPS.md) - GitOps introduction (then go to gitops-lab)
+
+**Graduate to production patterns (gitops-lab):**
+- Deploy this same app with ArgoCD (GitOps)
+- Add queue-based autoscaling (KEDA)
+- Make cost/deployment decisions (single-box vs ASG vs EKS)
+
+👉 **[Continue to gitops-lab](https://github.com/wware/gitops-lab)** for production deployment patterns
+
+---
+
 ## The API
 
 A minimal REST API with:
