@@ -1,0 +1,127 @@
+% Glossary entries for the book
+% Pure definitions without chapter references - the index provides page numbers
+
+\newglossaryentry{applicationset}{
+    name=ApplicationSet,
+    description={An ArgoCD object that generates multiple \texttt{Application} objects from one template and a generator (e.g., a directory listing)}
+}
+
+\newglossaryentry{backend}{
+    name=BackEnd (ABC),
+    description={The abstract base class every \texttt{gitops\_reconciler} backend implements: \texttt{apply()}, \texttt{destroy()}, \texttt{get\_outputs()}. Chosen over a \texttt{Protocol} because Pydantic gives it a real \texttt{isinstance()} check}
+}
+
+\newglossaryentry{controlloop}{
+    name=control loop,
+    description={The pattern underlying every reconciliation system in this book: read desired state, observe actual state, act to close the gap, repeat forever}
+}
+
+\newglossaryentry{configmap}{
+    name=ConfigMap,
+    description={A Kubernetes object holding non-secret configuration, injected into pods as environment variables or mounted files}
+}
+
+\newglossaryentry{deployment}{
+    name=Deployment,
+    description={A Kubernetes controller for stateless workloads that manages a ReplicaSet and handles rolling updates. Unlike StatefulSets, Deployments treat all replicas as interchangeable}
+}
+
+\newglossaryentry{desiredstate}{
+    name=desired state,
+    description={What a system is declared to look like, as opposed to what it currently looks like (actual state). The gap between the two is what every controller in this book exists to close}
+}
+
+\newglossaryentry{drift}{
+    name=drift,
+    description={When actual state no longer matches desired state, usually because something changed it directly rather than through the declared source of truth}
+}
+
+\newglossaryentry{gitops}{
+    name=GitOps,
+    description={Managing infrastructure by treating a git repository as the source of truth and running a controller that continuously reconciles real state to match it}
+}
+
+\newglossaryentry{hpa}{
+    name=HPA (HorizontalPodAutoscaler),
+    description={The Kubernetes object that scales a Deployment's replica count based on a metric. KEDA creates and drives a real HPA rather than replacing it}
+}
+
+\newglossaryentry{idempotent}{
+    name=idempotent,
+    description={An operation that produces the same result whether run once or many times. \texttt{apply()} is supposed to be idempotent for every backend in \texttt{gitops\_reconciler}; Compose and Pi fake it with a hash comparison since they have no native diff}
+}
+
+\newglossaryentry{irsa}{
+    name=IRSA (IAM Roles for Service Accounts),
+    description={The AWS mechanism binding a Kubernetes ServiceAccount to an IAM role via OIDC federation, so pods get scoped AWS credentials instead of inheriting the node's}
+}
+
+\newglossaryentry{keda}{
+    name=KEDA (Kubernetes Event-Driven Autoscaling),
+    description={Scales workloads based on external metrics (queue depth, etc.) rather than CPU/memory alone, by feeding a custom metric to a standard HPA}
+}
+
+\newglossaryentry{minikube}{
+    name=minikube,
+    description={A tool that runs a single-node Kubernetes cluster locally, primarily for development and learning. Similar tools include kind (Kubernetes in Docker) and k3s}
+}
+
+\newglossaryentry{namespace}{
+    name=namespace,
+    description={A Kubernetes resource that provides isolation boundaries within a cluster. Different namespaces can have separate RBAC policies, resource quotas, and network policies}
+}
+
+\newglossaryentry{oci}{
+    name=OCI (Open Container Initiative),
+    description={The industry standard for container image formats and runtimes. Ensures containers built by Docker can run with Podman or other OCI-compliant tools, and vice versa}
+}
+
+\newglossaryentry{operator}{
+    name=operator,
+    description={A controller, following the same watch-diff-act pattern as everything built into Kubernetes, that encodes domain-specific operational knowledge (e.g., how to run Postgres) on top of primitives like StatefulSet}
+}
+
+\newglossaryentry{pvc}{
+    name=PVC (PersistentVolumeClaim),
+    description={A request for storage in Kubernetes. The cluster provisions a PersistentVolume to satisfy the claim, decoupling what storage a pod needs from how that storage is actually provided}
+}
+
+\newglossaryentry{provenance}{
+    name=provenance (in this book's reconciler),
+    description={The git SHA recorded after a successful \texttt{apply()} call. The mechanism that makes the promotion pattern possible without any new abstractions}
+}
+
+\newglossaryentry{reconciliation}{
+    name=reconciliation,
+    description={The act of comparing desired and actual state and acting to close any gap. The verb behind every noun in this glossary}
+}
+
+\newglossaryentry{rbac}{
+    name=RBAC (Role-Based Access Control),
+    description={Kubernetes' system for controlling which identities can perform which actions against the API server, via Roles and RoleBindings (or ClusterRole/ClusterRoleBinding). Distinct from application-level auth}
+}
+
+\newglossaryentry{secret}{
+    name=Secret,
+    description={A Kubernetes object like ConfigMap, but for sensitive values---base64-encoded (not encrypted) by default, masked in \texttt{kubectl describe} output}
+}
+
+\newglossaryentry{selfheal}{
+    name=selfHeal,
+    description={An ArgoCD Application syncPolicy setting that automatically reverts manual changes to match git, rather than just flagging them as \texttt{OutOfSync}}
+}
+
+\newglossaryentry{service}{
+    name=Service,
+    description={A Kubernetes object that provides stable networking for a set of pods. Maps a fixed ClusterIP or external endpoint to dynamically-scheduled pods matched by label selectors}
+}
+
+\newglossaryentry{serviceaccount}{
+    name=ServiceAccount,
+    description={The identity a pod runs as when it talks to the Kubernetes API. Defaults to \texttt{default} with no permissions unless a Role is explicitly bound to it}
+}
+
+\newglossaryentry{statefulset}{
+    name=StatefulSet,
+    description={A Kubernetes controller for workloads needing stable identity and stable storage across rescheduling. Guarantees stop there---no built-in replication, failover, or backups}
+}

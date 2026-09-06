@@ -19,6 +19,8 @@ else
     BASE_URL="http://localhost:8000/api/v1"
 fi
 
+API_KEY="${API_KEY:-demo-key-a1b2c3d4e5}"
+
 echo "🔍 Testing API at ${BASE_URL}"
 echo ""
 
@@ -58,6 +60,7 @@ echo ""
 echo "➕ Creating new item (test-item)..."
 CREATE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST ${BASE_URL}/items \
     -H "Content-Type: application/json" \
+    -H "X-API-Key: ${API_KEY}" \
     -d '{
         "id": "test-item",
         "name": "Test Item",
@@ -78,6 +81,7 @@ echo ""
 echo "✏️ Updating item (test-item)..."
 UPDATE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X PUT ${BASE_URL}/items/test-item \
     -H "Content-Type: application/json" \
+    -H "X-API-Key: ${API_KEY}" \
     -d '{
         "id": "test-item",
         "name": "Updated Test Item",
@@ -101,7 +105,8 @@ fi
 # Test 8: Delete item
 echo ""
 echo "🗑️ Deleting item (test-item)..."
-DELETE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE ${BASE_URL}/items/test-item)
+DELETE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE ${BASE_URL}/items/test-item \
+    -H "X-API-Key: ${API_KEY}")
 check_response $DELETE_STATUS 200 "Delete item"
 
 # Test 9: Verify deletion (should 404)
@@ -121,9 +126,11 @@ echo ""
 echo "🚫 Testing error handling (duplicate creation)..."
 curl -s -X POST ${BASE_URL}/items \
     -H "Content-Type: application/json" \
+    -H "X-API-Key: ${API_KEY}" \
     -d '{"id": "item1", "name": "Duplicate", "value": 1}' > /dev/null
 DUPLICATE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST ${BASE_URL}/items \
     -H "Content-Type: application/json" \
+    -H "X-API-Key: ${API_KEY}" \
     -d '{"id": "item1", "name": "Duplicate", "value": 1}')
 check_response $DUPLICATE_STATUS 409 "Error handling - duplicate"
 
