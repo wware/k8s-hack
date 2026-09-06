@@ -286,7 +286,7 @@ async def create_item(item: Item) -> Item:
             item.value,
         )
         item_operations.labels(operation="create").inc()
-        logger.info("item created", extra={"item_id": item.id, "name": item.name, "value": item.value})
+        logger.info("item created", extra={"item_id": item.id, "item_name": item.name, "value": item.value})
         return item
 
 
@@ -313,7 +313,7 @@ async def update_item(item_id: str, item: Item) -> Item:
             item_id,
         )
         item_operations.labels(operation="update").inc()
-        logger.info("item updated", extra={"item_id": item_id, "name": item.name, "value": item.value})
+        logger.info("item updated", extra={"item_id": item_id, "item_name": item.name, "value": item.value})
         return item
 
 
