@@ -187,6 +187,578 @@ everything is hedged with "it's worth noting," and abstractions get restated
 instead of just used. So later we will look at these structural patterns and try
 to break them up.
 
+## Writing Chapter 1 (From Pet Servers to Cattle) in Will's voice
+
+### SSH in, hand-edit, restart, hope
+
+The old workflow doesn't need much reconstruction because most people who'd
+pick up this book have lived some version of it: `ssh` into the box, `vim`
+the config file, restart the service, watch the logs scroll by for a
+minute to confirm nothing's on fire, log out. It works. It's also the
+entire deployment process, in the sense that nothing about it exists
+anywhere except in that terminal session and, if you're lucky, in
+whatever you remember about it later.
+
+That's the part worth sitting with, not the SSH command itself. The
+change you just made -- what config value moved, why, what it was before
+-- lives in exactly one place: your memory of doing it, maybe backed by a
+comment you left in the file, if you left one. Six months later, "why is
+this set to 30 instead of the default of 10" has one honest answer: ask
+whoever did it, if they still work there, if they remember.
+
+### Snowflakes, and the gap between "works" and "works reliably"
+
+Do this enough times, on enough servers, and every server drifts into
+being slightly different from every other one -- not because anyone
+planned it that way, but because each one accumulated its own particular
+sequence of hand-applied fixes, each one applied under time pressure, to
+whatever that specific box happened to need at whatever moment someone
+was looking at it. Server A got a kernel parameter tuned during an
+incident eighteen months ago. Server B didn't, because it wasn't part of
+that incident. Nobody wrote either change down anywhere both servers
+would show up.
+
+"It works on my machine" is the famous version of this joke, but the
+sharper version, and the one that actually costs money, is "it works on
+this production server" -- meaning specifically this one, the one that's
+been hand-tuned by three different people responding to three different
+emergencies, and not the one you just brought up from the same base image
+that's supposedly identical to it. Two servers built from the same
+starting point stop being identical the first time someone touches one of
+them by hand and not the other. There's no mechanism forcing them back
+into agreement, so unless someone is deliberately auditing for drift --
+and auditing for drift by hand doesn't scale past a small number of
+servers -- they just keep diverging.
+
+### Describe, don't do
+
+Puppet, Chef, and Ansible were the first widely-adopted answer to this,
+and the shift they represent is worth naming precisely, because it's the
+same shift Kubernetes makes later, just at a smaller scope. The old
+workflow is a sequence of commands: SSH in, run this, run that, check if
+it worked. A Puppet manifest or an Ansible playbook is a description of
+what the machine should look like -- this package installed, this file
+containing this content, this service running -- and the tool's job is to
+look at the machine, compare it to the description, and make only the
+changes needed to close the gap. Run the same playbook twice and the
+second run should do nothing, because the machine already matches the
+description. That property -- safe to reapply, because it only acts on
+the difference -- is the whole reason these tools were an improvement,
+and it's the same property Chapter 5 is going to name explicitly as a
+control loop.
+
+It wasn't a complete fix. These tools still ran on a schedule, or on
+demand, not continuously, so drift could reopen between runs, and someone
+still had to remember to run them. But the core move -- write down what
+the machine should look like, then let a tool make it true -- is the same
+move every chapter after this one keeps making at a larger scope.
+
+### Physical servers to orchestrated containers, briefly
+
+The rest of this progression is really the same idea, applied one layer
+up each time, as the unit being managed keeps shrinking and multiplying:
+physical servers you could touch, one OS per machine, one workload's
+mistake capable of taking down everything else sharing that hardware.
+Virtual machines split one physical box into several isolated ones,
+solving the sharing problem but still booting a full OS per workload,
+still slow to provision, still something you patched and drifted the same
+way individual servers had. Containers dropped the "boot a full OS"
+requirement -- share the host kernel, isolate everything else -- and
+suddenly a workload went from something that took minutes to provision to
+something that took seconds, and from one process per physical or virtual
+machine to dozens of processes safely sharing one machine.
+
+That last shift is what makes orchestration necessary rather than
+optional. Provisioning a VM was slow and rare enough that a human
+deciding where it should run was fine. Once workloads are containers that
+start in under a second and a single host might run dozens of them, "a
+person decides where each one goes" stops being a workflow and starts
+being the bottleneck. Something has to decide placement, notice failures,
+and keep desired counts correct, continuously, faster than any person
+could do it by hand. That something is the subject of the rest of this
+book.
+
+## Writing Chapter 2 (The Security Case for Systematized Infrastructure) in Will's voice
+
+### Ad-hoc ops was always risky
+
+Chapter 1 made the productivity case against hand-edited servers: drift,
+lost context, nobody quite sure what's actually running. All of that is
+also, separately, a security problem, and it was one even before the
+threat landscape got worse. A server that's been hand-patched by three
+different people over two years has no record of what was changed, which
+means it also has no record of *whether every change was supposed to
+happen*. An unauthorized change and an authorized-but-undocumented change
+look identical from the outside -- neither one shows up anywhere except
+in what the server is currently doing.
+
+### Why it's worse now
+
+Two things changed the stakes on top of that baseline risk. First, attack
+tooling industrialized. Scanning the entire public IPv4 address space for
+a specific vulnerable service configuration used to be a research project;
+it's now a background process, running constantly, from multiple
+directions at once. A misconfiguration that used to be safe because
+nobody was likely to stumble onto it in the time it took you to notice
+and fix it is no longer safe on that assumption -- something is checking,
+right now, and will check again in an hour.
+
+Second, the supply chain became a target in its own right. A compromised
+build dependency, a poisoned base image, a maintainer's stolen credentials
+on a widely-used package -- these don't require finding a hole in your
+infrastructure at all. They ride in through the normal process of
+building and deploying software, the same process every other chapter in
+this book is about making safer, not riskier. Ransomware-as-a-service
+turned the profit motive behind all of this into something available to
+anyone willing to pay for access, not just a small number of technically
+sophisticated actors. The threat model isn't "a skilled attacker might
+target us specifically" anymore. It's "automated tooling will find
+whatever's exposed, and someone downstream will monetize it."
+
+### No diff, no review, no rollback
+
+Put those two together and the hand-edited server from Chapter 1 stops
+being merely inefficient and starts being a liability, for a specific,
+mechanical reason: a manual change has no diff. Nobody reviewed it before
+it went live, because there was no artifact to review -- the "change" was
+a person typing commands into a terminal, not a pull request. If it turns
+out to have been a mistake, or worse, if it turns out to have been made by
+someone who shouldn't have had that access in the first place, there's no
+clean way to know what it changed or to undo it, because undoing it means
+remembering, by hand, what it was before.
+
+Version-controlled infrastructure closes that gap by construction, not by
+policy. When the desired state of a server or a cluster lives in a git
+repository, every change is a commit: who made it, when, exactly what
+changed, and -- if the review discipline from ordinary software
+engineering gets applied here too -- someone else looked at it before it
+took effect. A bad change is `git revert`, not an afternoon of
+archaeology. This isn't a new security control bolted onto infrastructure
+that used to lack one. It's the existing discipline of code review and
+version control, already trusted for the application, extended to cover
+the infrastructure that application runs on.
+
+### If it's not in git, it shouldn't be running
+
+That's the principle worth carrying into every chapter after this one,
+because it's going to come back explicitly more than once: version
+control isn't a convenience for infrastructure, it's the mechanism that
+makes infrastructure auditable at all. A system where every running
+change traces back to a reviewed commit is a system where "what's running
+and why" always has an answer. A system where changes can still be made
+by hand, outside that record, has a permanent, unfixable gap between what
+the repository says and what's actually true -- and that gap is exactly
+where both Chapter 1's drift problem and this chapter's security problem
+live. Chapter 9 is going to spend real time on what happens once that gap
+gets automated away entirely, git no longer just describing infrastructure
+but actively defending it. Everything between here and there is really
+this same idea, worked out at increasing scale.
+
+## Writing Chapter 3 (Docker: Packaging Reality) in Will's voice
+
+### What a container actually is, briefly
+
+A container is not a lightweight virtual machine, even though it gets
+described that way often enough that the description sticks. A VM
+virtualizes hardware and boots a full second kernel on top of it. A
+container is just an ordinary process on the host, running under the
+same kernel as everything else, made to believe it's alone through three
+mechanisms working together: **namespaces** hide everything the process
+shouldn't see -- its own process ID space, its own network interfaces,
+its own filesystem mounts, so `ps` inside the container shows a handful
+of processes, not the host's real few hundred. **cgroups** cap what the
+process is allowed to consume -- CPU, memory, I/O -- so one runaway
+container can't starve everything else on the box. And a **union
+filesystem** layers a stack of read-only image layers under one
+writable layer on top, so the container appears to have its own private
+filesystem without needing to actually copy the whole thing.
+
+None of that is magic, and none of it requires believing anything about
+containers being a fundamentally new kind of computing. It's namespacing,
+resource limiting, and clever filesystem layering, and Docker's actual
+contribution in 2013 wasn't inventing any of these three mechanisms --
+Linux had namespaces and cgroups already, and LXC had been wiring them
+together for years before Docker existed. Docker's contribution was
+making the packaging and distribution of the result trivial: a
+`Dockerfile`, a build command, and an image anyone else can pull and run
+without caring how any of those three mechanisms actually work.
+
+### Images vs. containers, and the Dockerfile as a recipe
+
+The distinction that trips people up first: an image is not a container,
+it's what a container is made from. This repo's `Dockerfile` is short
+enough to read as a whole:
+
+```dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app.py ./
+
+EXPOSE 8000
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+Six meaningful lines, and each one -- `FROM`, `COPY`, `RUN`, `COPY` again
+-- adds one more layer to the union filesystem the previous section
+described. `docker build` doesn't run this file the way a shell script
+runs; it produces an image, a stack of those layers, and it's worth
+seeing that stack for real rather than taking "layered" as an abstract
+claim:
+
+```shell
+docker history k8s-toy-api:local
+```
+
+```
+IMAGE          CREATED        CREATED BY                                      SIZE
+57163a50e75e   ...            CMD ["uvicorn" "app:app" ...                    0B
+<missing>      ...            EXPOSE [8000/tcp]                               0B
+<missing>      ...            COPY app.py ./ # buildkit                       11.3kB
+<missing>      ...            RUN /bin/sh -c pip install --no-cache-dir -r…   62.1MB
+<missing>      ...            COPY requirements.txt ./ # buildkit             115B
+<missing>      ...            WORKDIR /app                                    0B
+                              [... python:3.12-slim base layers below ...]
+```
+
+`COPY app.py ./` is 11.3 kilobytes -- that's the entire application, one
+file. Everything above a few hundred kilobytes in that list belongs to
+either the `pip install` layer or the Debian base image underneath it,
+none of which this repo wrote. That's the actual payoff of layering, made
+concrete instead of asserted: change `app.py` and rebuild, and Docker
+only has to redo the `COPY app.py` layer and whatever comes after it in
+the file -- the `pip install` layer, unchanged since `requirements.txt`
+didn't change, gets reused straight from cache. A Dockerfile is a recipe
+in the specific sense that each step describes an incremental change to
+apply on top of the last one, not a script that runs top to bottom and
+discards its intermediate state.
+
+### A short history, and why "works in the container" is a stronger claim
+
+`chroot` gave a process its own root filesystem view in 1979 -- the
+oldest of these three mechanisms by a wide margin, and proof this idea
+isn't new. LXC, starting around 2008, was the first attempt to wire
+namespaces and cgroups together into something usable as "a container,"
+and it worked, but using it meant understanding all three mechanisms
+individually and assembling them by hand. Docker's 2013 release didn't
+replace any of that machinery -- early Docker used LXC directly under
+the hood -- it replaced the assembly step with a `Dockerfile` and a
+single `docker build`, and that packaging leap is what actually took off.
+The OCI (Open Container Initiative) standardization that followed
+formalized the image format itself, which is why an image built by
+Docker runs fine under containerd or Podman today -- the format outlived
+the tool that popularized it.
+
+"Works on my machine" was never a claim about the code; it was a claim
+about everything *surrounding* the code on that one machine -- library
+versions, OS packages, environment variables nobody wrote down. "Works in
+the container" is a stronger claim because the image is that entire
+surrounding environment, made explicit in a file, checked into git next
+to the code it runs. `python:3.12-slim` at the base of this repo's image
+is a specific, named, versioned thing, not "whatever Python happens to be
+installed on this box today." The whole rest of this book is going to
+keep leaning on that same move -- take something that used to live only
+in one person's memory of what they did to a machine, and make it a
+committed file instead -- so it's worth having Chapter 3 be the place
+that move first gets named plainly, at the smallest possible scale, one
+image.
+
+### Further reading
+
+Docker's own "Get Started" guide is still the fastest way to build the
+muscle memory for `build`/`run`/`exec` before any of the orchestration
+chapters pile more on top of it. *The Docker Book* (James Turnbull) goes
+deeper into the daemon and networking model than this chapter needs to.
+The OCI image spec itself, for anyone who wants to see exactly what
+"layer" and "manifest" mean at the level of actual JSON on disk, is short
+enough to read in one sitting and worth it once namespaces and cgroups
+stop being new.
+
+## Writing Chapter 4 (Docker Compose: Orchestration's Training Wheels) in Will's voice
+
+### One file, two services, one command
+
+`docker-compose.yml` in this repo describes the same two-service app
+Chapter 3 built one image for -- `postgres` and `api` -- as a single YAML
+file instead of two separate `docker run` invocations someone would
+otherwise have to remember and re-type correctly every time:
+
+```yaml
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: toyapi
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/toyapi"
+    depends_on:
+      postgres:
+        condition: service_healthy
+```
+
+`docker compose up -d --build` builds the image from Chapter 3's
+Dockerfile, starts both containers, and waits:
+
+```shell
+docker compose up -d --build
+```
+
+```
+ Container k8s-hack-postgres-1  Starting
+ Container k8s-hack-postgres-1  Started
+ Container k8s-hack-postgres-1  Waiting
+ Container k8s-hack-postgres-1  Healthy
+ Container k8s-hack-api-1  Starting
+ Container k8s-hack-api-1  Started
+```
+
+That "Waiting" line is `depends_on: condition: service_healthy` actually
+doing something, not just documentation -- `api` doesn't start until
+`postgres`'s own `healthcheck` (`pg_isready`) reports healthy, because
+`api` connects to the database on startup and gains nothing by racing it.
+Both containers come up healthy, and the API works exactly as it did
+under Kubernetes in Chapter 6:
+
+```shell
+curl -s http://localhost:8000/api/v1/healthz
+curl -s http://localhost:8000/api/v1/items
+```
+
+```json
+{"status":"ok","database":"connected"}
+[{"id":"item1","name":"First Item","value":100},{"id":"item2","name":"Second Item","value":200}]
+```
+
+Same image, same app code, same `JSONFormatter` from Chapter 11 --
+`docker compose logs api` shows the identical structured JSON, down to
+the same `pod` field the app writes into every log line, just holding a
+container ID (`f2e4d42dc861`) instead of a Kubernetes pod name, because
+`app.py` reads that field from `HOSTNAME` and Docker sets `HOSTNAME` to
+the container ID the same way Kubernetes sets it to the pod name. The
+logging code doesn't know or care which one it's running under.
+
+### What Compose gets right
+
+This is the whole deployment: one file, one command, and a `docker-compose.yml`
+that a new developer can read top to bottom in under a minute and
+understand exactly what's going to run. There's no cluster to provision
+first, no separate image-loading step the way `minikube image load`
+needed one in Chapter 6 -- Compose builds straight from the Dockerfile
+and runs it on the same Docker daemon, immediately. That's real, and it's
+why Compose is still the right answer for local development even on a
+project that deploys to Kubernetes in production: the fastest path from
+"clone the repo" to "the app is running and I can poke at it" almost
+never runs through a cluster.
+
+### Where the ceiling actually is
+
+Push on it a little and the ceiling stops being theoretical. Ask Compose
+for three copies of `api` instead of one:
+
+```shell
+docker compose up -d --scale api=3
+```
+
+```
+ Container k8s-hack-api-3  Starting
+Error response from daemon: failed to set up container networking: driver failed programming external connectivity on endpoint k8s-hack-api-3 (80c154af11f7...): Bind for 0.0.0.0:8000 failed: port is already allocated
+```
+
+```shell
+docker compose ps -a
+```
+
+```
+NAME                  STATUS                    PORTS
+k8s-hack-api-1        Up 19 seconds (healthy)   0.0.0.0:8000->8000/tcp
+k8s-hack-api-2        Created
+k8s-hack-api-3        Created
+k8s-hack-postgres-1   Up 25 seconds (healthy)
+```
+
+`api-2` and `api-3` exist, as containers, and go no further --
+`Created`, never `Up`. `docker-compose.yml` maps `api`'s port with
+`"8000:8000"`, a literal host port, and a host only has one port 8000.
+The first container to claim it wins; everything after that fails to
+bind. This isn't a bug or a missing flag. `docker-compose.yml`'s port
+mapping is written as "this container's port 8000 goes on this host's
+port 8000," and that sentence has no meaning once there's more than one
+container trying to be the answer to it. Chapter 5's Service object
+exists specifically to answer a different question -- "route to whichever
+of these pods is healthy right now" -- and that question doesn't have a
+sensible answer inside a single `docker-compose.yml` file at all, because
+Compose has no concept of "a stable address in front of more than one
+container." Multi-host scheduling has the same shape of problem one level
+up: Compose has one Docker daemon to talk to, on one host, so "which of N
+machines should this container run on" isn't a question Compose is even
+positioned to ask.
+
+Rolling updates hit a version of the same wall. `docker compose up
+--build` after changing `app.py` stops the old `api` container and starts
+a new one -- not simultaneously, not with the old one kept alive until the
+new one proves itself healthy, the way Chapter 8 watched a bad
+`ConfigMap` change get rejected by Kubernetes without ever taking `toy-api`
+down. Compose's healthcheck exists and works, as `postgres`'s did above,
+but nothing in Compose reads it to decide whether it's safe to remove an
+old container yet. That gating logic is exactly what a Deployment's
+rolling update adds on top of the same healthcheck idea.
+
+### The right tool until it isn't
+
+None of this makes `docker-compose.yml` worse than the seven YAML files
+from Chapter 9's comparison -- it's 41 lines against 201, and for a
+single host running two containers, it is a strictly better fit. The
+honest way to hold both facts at once: Compose describes an application
+on one machine, completely and well, and every one of the gaps above --
+one host, a fixed port that can't be shared, no gating on rollouts -- is
+a gap that only matters once there's more than one machine, more than one
+copy of a service, or an update that has to happen without taking
+anything down. Chapter 9 will come back to this exact tradeoff once
+there's a full Kubernetes deployment to compare it against squarely. For
+now, the ceiling is the point: everything Compose can't do in this
+chapter is a preview of what the next several chapters exist to fix.
+
+## Writing Chapter 5 (What Kubernetes Actually Is) in Will's voice
+
+### The control loop, not the orchestrator
+
+Chapter 4 ended at Compose's ceiling: one host, and nothing watching over
+it once `docker compose up` returns. That second part is the real gap.
+`docker-compose.yml` describes what should run, `docker compose up` makes
+it run, and then the description's job is finished. If a container dies
+five minutes later, nothing goes back and checks the file again. You find
+out because the app is down, not because anything noticed the file said
+otherwise.
+
+Kubernetes' actual job is to keep noticing. Not once, at apply time, but
+continuously, forever, until you change your mind. `deployment.yaml`
+doesn't say "start 2 containers" -- Chapter 6 covers this file in detail,
+but the shape of it matters here first -- it says `replicas: 2`, a fact
+about how the world ought to look. Something is always comparing that
+fact against how the world actually looks, and closing the gap whenever
+the two disagree:
+
+```
+loop forever:
+    desired = read the spec
+    actual  = observe the cluster
+    if desired != actual:
+        act to close the gap
+```
+
+That's the entire idea. Everything else in Kubernetes -- the scheduler
+placing pods, the kubelet keeping containers running, the whole apparatus
+Chapter 7 puts through its paces -- is one more instance of this same
+loop, watching a different piece of the world. It's why deleting a pod on
+purpose and a node crashing and killing that pod by accident produce the
+identical outcome: the loop doesn't know or care why `actual` stopped
+matching `desired`, only that it did. A Compose restart policy is a rule
+about one specific failure you anticipated. A control loop has no list of
+anticipated failures -- it just keeps rechecking, so anything that
+knocks `actual` out of line with `desired` gets corrected the same way,
+whether you predicted it or not.
+
+### The control plane is not magic -- it's pods
+
+Ask this cluster what's actually running its control plane:
+
+```shell
+kubectl get pods -n kube-system
+```
+
+```
+NAME                               READY   STATUS    RESTARTS      AGE
+coredns-7d764666f9-t5p4b           1/1     Running   0             25h
+etcd-minikube                      1/1     Running   0             25h
+kube-apiserver-minikube            1/1     Running   0             25h
+kube-controller-manager-minikube   1/1     Running   0             25h
+kube-proxy-dpl4j                   1/1     Running   0             25h
+kube-scheduler-minikube            1/1     Running   0             25h
+storage-provisioner                1/1     Running   2 (16h ago)   25h
+```
+
+`kube-apiserver-minikube`, `kube-scheduler-minikube`,
+`kube-controller-manager-minikube`, `etcd-minikube` -- the four pieces
+usually drawn as a special box labeled "control plane" in every
+Kubernetes diagram -- are just pods, in this same `kubectl get pods`
+output, next to `coredns` and a storage provisioner. Minikube runs them
+as ordinary containers because that's what they are. A managed cluster
+(EKS, GKE, AKS) hides these behind the cloud provider so you're not
+responsible for keeping etcd alive, but hiding them doesn't change what
+they are underneath -- four programs, each with one job, watching each
+other's output the same way `toy-api`'s pods get watched by the
+Deployment controller.
+
+What each one actually does, briefly:
+
+- **`kube-apiserver`** is the only thing that talks to `etcd` directly.
+  Every other piece here, including `kubectl` itself, only ever talks to
+  the API server. `kubectl apply -f deployment.yaml` is a write to the
+  API server, nothing more.
+- **`etcd`** is where the desired state actually lives -- not the YAML
+  file on disk, which is only a copy, but this key-value store. The file
+  is how you tell etcd what to remember.
+- **`kube-scheduler`** watches for pods that exist in the desired state
+  but haven't been assigned to a node yet, and picks one.
+- **`kube-controller-manager`** runs the control loops themselves -- the
+  one that keeps a Deployment's replica count correct is one of many
+  bundled in here.
+
+Down on the node, outside this control-plane list, two more pieces close
+the loop: the **kubelet** watches the API server for pods assigned to
+its own node and makes sure their containers are actually running, and
+**kube-proxy** (also visible above, as `kube-proxy-dpl4j`) sets up the
+networking rules that make a Service's stable address actually route to
+the right pods. Nothing here is a black box. It's the same watch-diff-act
+loop from the last section, six times, each instance responsible for one
+slice of "does reality match the spec."
+
+### Mapping what you already know
+
+Chapter 4 walked through this repo's `docker-compose.yml` -- two
+services, `postgres` and `api`, each described by roughly a dozen lines.
+Every one of those lines has a direct Kubernetes equivalent; it's just
+split across more files, because Kubernetes gives each concern its own
+object instead of one file per application:
+
+| Compose concept | Kubernetes equivalent |
+|---|---|
+| `services.api` | Deployment (`deployment.yaml`) |
+| `services.postgres` | StatefulSet (`postgres-statefulset.yaml`) -- Chapter 6 covers why a database gets a different object than a stateless service |
+| `ports: "8000:8000"` | Service (`service.yaml`) -- a stable address, decoupled from any one container |
+| `environment:` (non-secret values) | ConfigMap (`postgres-configmap.yaml`) |
+| `environment:` (`POSTGRES_PASSWORD`) | Secret (`postgres-secret.yaml`) |
+| `volumes: postgres_data:...` | PersistentVolumeClaim (`postgres-pvc.yaml`) |
+| `healthcheck:` | `livenessProbe` / `readinessProbe` on the pod spec |
+| `depends_on: condition: service_healthy` | no direct equivalent -- Chapter 6 covers how `start.sh` handles this by waiting on readiness explicitly |
+
+The table looks like Kubernetes just renamed things and split them into
+more files, and at the level of "what fields exist," that's not wrong.
+The actual difference is everything from the first two sections of this
+chapter: Compose's version of this table describes a single `docker
+compose up` invocation, done once. Kubernetes' version describes a
+standing order that a handful of control loops keep enforcing against
+whatever's actually running, on whichever of however many nodes happen
+to be available, for as long as the cluster exists. Same information,
+different verb tense -- Compose says "do this," Kubernetes says "keep
+this true."
+
 ## Writing Chapter 6 (Your First Deployment) in Will's voice
 
 ### `./start.sh`: containers + orchestration, not magic
@@ -1073,47 +1645,43 @@ just uses the language you're already in.
 
 ### Where this file actually stands right now
 
-Worth being straight about something: this Pulumi program isn't a clean
-parallel of the toy-api YAML from Chapters 6 through 8. It deploys an
-image called `tg-core-graph-api:local`, from a different exercise
-(`tg-core`) than the `k8s-toy-api:local` this book has been walking
-through, and along the way it's picked up a Prometheus deployment scraping
-`graph-api`'s `/metrics` endpoint and a Grafana deployment wired to that
-Prometheus as its one datasource. None of that was in the file when this
-repo's `README.md` was written -- the README still describes it as
-creating "the exact same ConfigMap + Deployment + Service as the YAML
-manifests," which was true once and isn't anymore.
+This Pulumi program is not a clean parallel of the toy-api YAML from Chapters 6
+through 8. It deploys an image called `tg-core-graph-api:local`, from a
+different exercise (`tg-core`) than the `k8s-toy-api:local` this book has been
+walking through, and along the way it's picked up a Prometheus deployment
+scraping `graph-api`'s `/metrics` endpoint and a Grafana deployment wired to
+that Prometheus as its one datasource. None of that was in the file when this
+repo's `README.md` was written -- the README still describes it as creating
+"the exact same ConfigMap + Deployment + Service as the YAML manifests," which
+was true once and isn't anymore.
 
-That gap is worth sitting with rather than quietly fixing before anyone
-notices, because it's a small, harmless instance of a problem that gets
+This is now a small, harmless instance of a problem, but it's one that gets
 expensive at real scale: documentation describes the infrastructure as of
-whenever someone last updated the doc, and the infrastructure-as-code
-keeps moving. A YAML manifest and a Pulumi program are both supposed to be
-the source of truth for what's running -- that's the entire pitch of this
-part of the book -- but nothing enforces that a README stays truthful
-about either one. The fix isn't clever tooling, it's the same discipline
-Chapter 2 argued for at the start: if a description of the system lives
-outside the system's own declared state, it drifts, and the only real
-defense is noticing.
+whenever someone last updated the doc, and the infrastructure-as-code keeps
+moving. A YAML manifest and a Pulumi program are both supposed to be the source
+of truth for what's running -- that's the entire pitch of this part of the book
+-- but nothing enforces that a README stays truthful about either one. The fix
+isn't clever tooling, it's the same discipline Chapter 2 argued for at the
+start: *if a description of the system lives outside the system's own declared
+state, it drifts, and the only real defense is noticing.*
 
 ### When Pulumi earns its complexity over plain manifests
 
-None of this makes Pulumi strictly better than YAML. It's more machinery:
-a language runtime, a package manager, a state backend that has to be
-reachable and correctly authenticated before `pulumi up` does anything at
-all -- the Pulumi program in this repo is configured against a remote
-backend, and if that backend is unreachable, `pulumi stack ls` fails
-outright before you get anywhere near applying anything. `kubectl apply -f
-service.yaml` has no equivalent failure mode; the manifest is the state.
+None of this makes Pulumi strictly better than YAML. It's more machinery: a
+language runtime, a package manager, a state backend that has to be reachable
+and correctly authenticated before `pulumi up` does anything at all. The Pulumi
+program in this repo is configured against a remote backend, and if that
+backend is unreachable, `pulumi stack ls` fails outright before you get
+anywhere near applying anything. `kubectl apply -f service.yaml` has no
+equivalent failure mode; the manifest is the state.
 
-The honest answer for when the extra machinery is worth it: once a
-project has more than a handful of resources, once the same shapes
-(a Deployment plus a Service plus a ConfigMap, over and over) start
-repeating across services, or once "I made a typo in a field name" has
-actually cost someone a debugging session, a real language starts paying
-for itself. A single toy API with one ConfigMap doesn't need it. This
-repo's own Pulumi file, three services deep and still growing, is
-starting to sit right at that line.
+This extra machinery becomes worthwhile when a project has more than a handful
+of resources, when the same shapes (a Deployment plus a Service plus a
+ConfigMap, over and over) start repeating across services, or when "I made a
+typo in a field name" has actually cost someone a debugging session. That's
+when a real language starts paying for itself. A single toy API with one
+ConfigMap doesn't need it. This repo's own Pulumi file, three services deep and
+still growing, is starting to sit right at that line.
 
 ## Writing Chapter 11 (Observability Basics: Logging) in Will's voice
 
