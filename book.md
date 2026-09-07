@@ -61,7 +61,7 @@ I'm interested in making this a book with reference to these repositories on Git
      -- as the visible evidence of one guarantee apiece, not just boilerplate
    - Where the promises run out: a bare StatefulSet's guarantees stop at
      identity and storage -- nothing about replication, failover, or backups.
-     That gap is Chapter 9's subject
+     That gap is part of Chapter 9's subject
 
 7. **Self-Healing and Scaling**
    - Deleting a pod on purpose and watching Kubernetes notice
@@ -74,15 +74,15 @@ I'm interested in making this a book with reference to these repositories on Git
    - PersistentVolumeClaims: storage that outlives the pod
    - Hands-on: editing config, restarting pods, confirming the new values land
 
-9. **Infrastructure as Code, Take One: Pulumi**
-   - Same resources, different syntax: YAML manifests vs. a real programming language
-   - Type checking, reusable modules, and why this starts to matter at scale
-   - When Pulumi (or Terraform, CDK, etc.) earns its complexity over plain manifests
-
-10. **When *Not* to Use Kubernetes**
+9. **When *Not* to Use Kubernetes**
     - Referenced doc: `WHY_KUBERNETES.md`
     - Operational cost: what running K8s well actually requires (a team, not a weekend)
     - Signs you don't need it yet, and signs you're about to
+
+10. **Infrastructure as Code, Take One: Pulumi**
+    - Same resources, different syntax: YAML manifests vs. a real programming language
+    - Type checking, reusable modules, and why this starts to matter at scale
+    - When Pulumi (or Terraform, CDK, etc.) earns its complexity over plain manifests
 
 11. **Observability Basics: Logging**
     - Referenced doc: `LOGGING.md`
@@ -119,7 +119,7 @@ I'm interested in making this a book with reference to these repositories on Git
     - Option A: Single-box autoscaling -- cheapest, simplest, no HA
     - Option B: AWS Auto Scaling Groups -- cheap, AWS-native, scaling lag
     - Option C: Real EKS -- expensive, complex, industry-standard, justified past a certain team/scale threshold
-    - A decision framework, not a default answer: matching infrastructure to actual need (echoes Chapter 10)
+    - A decision framework, not a default answer: matching infrastructure to actual need (echoes Chapter 9)
 
 18. **Side Quests**
     - EKS emulation on a home LAN (kubeadm + MetalLB): learning multi-node mechanics without AWS bills
@@ -765,3 +765,508 @@ perspective nothing happened. This is the actual mechanism behind "storage
 outlives the pod": not magic persistence, just the same PVC getting
 claimed again by whatever process the StatefulSet starts under that name
 next.
+
+### ConfigMap and Secret, side by side
+
+`postgres-configmap.yaml` holds four fields -- host, port, database name,
+username. `postgres-secret.yaml` holds exactly one -- the password. Every
+one of those five values ends up in the same place: `deployment.yaml`
+reads all of them into environment variables on the `api` container, and
+one more variable, `DATABASE_URL`, is built by string-substituting all
+five together.
+
+```yaml
+# deployment.yaml, abbreviated
+env:
+  - name: POSTGRES_HOST
+    valueFrom:
+      configMapKeyRef:
+        name: postgres-config
+        key: POSTGRES_HOST
+  # ...POSTGRES_PORT, POSTGRES_DB, POSTGRES_USER the same way
+  - name: POSTGRES_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: postgres-secret
+        key: POSTGRES_PASSWORD
+  - name: DATABASE_URL
+    value: postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)
+```
+
+Same `env` list, same `valueFrom` mechanism, same moment at container
+start when the value gets read in. If you only looked at timing, a
+ConfigMap and a Secret are identical -- which is exactly what the earlier
+experiment already proved for the ConfigMap half: edit it, and a running
+pod keeps the old value until something restarts it. A Secret behaves no
+differently on that score. So the split isn't about *when* Kubernetes
+hands the value to the container. It's about what kind of thing the value
+is once it's sitting in etcd or showing up in `kubectl` output.
+
+Ask the cluster for the ConfigMap and it just tells you:
+
+```shell
+kubectl get configmap postgres-config -o yaml
+```
+
+```yaml
+apiVersion: v1
+data:
+  POSTGRES_DB: toyapi
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: postgres
+kind: ConfigMap
+```
+
+Ask for the Secret the same way:
+
+```shell
+kubectl get secret postgres-secret -o yaml
+```
+
+```yaml
+apiVersion: v1
+data:
+  POSTGRES_PASSWORD: cG9zdGdyZXM=
+kind: Secret
+type: Opaque
+```
+
+`cG9zdGdyZXM=` is not encrypted -- it's base64, which anyone can decode in
+one command (`echo cG9zdGdyZXM= | base64 -d` gets you back `postgres`).
+Kubernetes isn't hiding the password from someone with access to read
+Secrets in this namespace. What the Secret type actually buys you is
+narrower and easy to undersell: it's excluded from `kubectl describe`'s
+normal output, it can be RBAC-scoped separately from ConfigMaps so
+"who can read config" and "who can read passwords" are different
+permissions, and it signals to every tool in the ecosystem -- Sealed
+Secrets, External Secrets, Vault integrations -- that this value belongs
+to a different handling path than everything else in the pod's
+environment. `describe pod` makes the distinction visible in one place:
+
+```shell
+kubectl describe pod toy-api-6fc5ddfd6d-7gn64   # use your own pod's name
+```
+
+```
+Environment:
+  POSTGRES_HOST:      <set to the key 'POSTGRES_HOST' of config map 'postgres-config'>  Optional: false
+  POSTGRES_PORT:      <set to the key 'POSTGRES_PORT' of config map 'postgres-config'>  Optional: false
+  POSTGRES_DB:        <set to the key 'POSTGRES_DB' of config map 'postgres-config'>    Optional: false
+  POSTGRES_USER:      <set to the key 'POSTGRES_USER' of config map 'postgres-config'>  Optional: false
+  POSTGRES_PASSWORD:  <set to the key 'POSTGRES_PASSWORD' in secret 'postgres-secret'>  Optional: false
+  DATABASE_URL:       postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)
+```
+
+Four lines name their ConfigMap and show nothing else to hide. The fifth
+names its Secret and stops there -- `kubectl describe` won't print a
+Secret's value even if you're staring right at the pod that consumes it.
+Same list, same mechanism, one visibly different rule for one line, and
+that line is the one line in this file that was never meant to be
+readable in passing.
+
+`postgres-secret.yaml` says the quiet part out loud in a comment: `stringData`
+is used here "for readability," and in production you'd reach for Sealed
+Secrets or External Secrets instead. Both of those close the actual gap --
+neither etcd nor a `kubectl get -o yaml` from someone with namespace access
+should be enough to read a real password -- but that's a problem for a
+later chapter. What this repo demonstrates is the shape of the split, not
+yet the hardened version of it.
+
+## Writing Chapter 9 (When Not to Use Kubernetes) in Will's voice
+
+### The same app, two ways
+
+This repo has both versions sitting side by side. `docker-compose.yml` is
+41 lines and two services:
+
+```yaml
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: toyapi
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/toyapi"
+    depends_on:
+      postgres:
+        condition: service_healthy
+```
+
+`docker compose up` and both containers are running, `api` waiting for
+`postgres`'s healthcheck before it starts, both reachable on their mapped
+ports. That's the whole deployment.
+
+The Kubernetes version of the identical app -- same image, same Postgres,
+same environment variables -- is seven YAML files totaling 201 lines
+(`postgres-configmap.yaml`, `postgres-secret.yaml`, `postgres-pvc.yaml`,
+`postgres-statefulset.yaml`, `postgres-service.yaml`, `deployment.yaml`,
+`service.yaml`), plus `start.sh`, 63 lines of shell to apply them in the
+right order and wait for each one to actually come up before moving on to
+the next. That's not a criticism of either file -- both are doing what
+they were designed to do, correctly. It's the actual, measured cost of
+the thing Chapter 5 called a control loop: seven times more YAML, plus an
+orchestration script Compose doesn't need at all, to run the same two
+containers on the same one machine.
+
+### What all that extra machinery is buying, here, right now
+
+Go back through the "why Kubernetes" list from Chapter 5's control-loop
+framing -- multi-host scheduling, self-healing across machines, rolling
+updates with real health gating -- and check which of those this repo's
+minikube setup actually has:
+
+- **Multi-host scheduling?** No. Minikube is one node. Every pod in this
+  repo, `toy-api` and `postgres` alike, lands on the same machine, every
+  time.
+- **Survives a node dying?** No, not meaningfully -- there's only the one
+  node. If it goes down, everything on it goes down, StatefulSet or not.
+- **Multiple teams sharing a cluster?** No. It's one person running one
+  app on one laptop.
+- **Autoscaling on real load?** Not configured, and there's no load to
+  scale against.
+
+What's actually being exercised is the Deployment controller replacing a
+pod you killed on purpose (Chapter 7), and a rolling update refusing to
+take down a healthy pod for a bad config change (Chapter 8). Both real,
+both worth learning -- and both things `docker compose up --scale` and a
+restart policy get you a version of, on one box, without seven YAML files.
+The honest reading of this repo's own setup is that it's demonstrating
+Kubernetes mechanics on a workload that doesn't yet need Kubernetes. That
+was the point -- it's a learning exercise, not a counterargument to
+Chapter 5. But it's also exactly the shape of the mistake `WHY_KUBERNETES.md`
+warns about: reaching for the fleet-management tool before there's a
+fleet.
+
+### What running Kubernetes well actually requires
+
+The 201 lines of YAML are the part you write once. The part that doesn't
+show up in any file is what it costs to run this well past a learning
+cluster: someone has to own etcd's health, because etcd is the one thing
+in this whole system that has no fallback if it loses quorum. Someone has
+to keep the control plane's Kubernetes version current, because managed
+control planes still expect you to handle node-side upgrades. Someone has
+to actually read `kubectl get pods` output and notice a `CrashLoopBackOff`
+before a customer does, because Kubernetes will happily leave a broken
+Deployment in that state forever without paging anyone on its own.
+`WHY_KUBERNETES.md` puts the comparison plainly: a managed database (RDS,
+Cloud SQL) makes the cloud provider your Operator; a bare StatefulSet like
+`postgres-statefulset.yaml` in this repo makes *you* the Operator, and an
+Operator's job is a lot more than the two guarantees -- stable identity,
+stable storage -- that a StatefulSet actually provides. That's a team's
+worth of ongoing attention, not a weekend project, and it's a cost that
+exists whether or not you're using any of the capacity it buys you.
+
+### Signs you don't need it yet, and signs you're about to
+
+The `docker-compose.yml` in this repo is the honest baseline: one host,
+one team, a healthcheck and a restart policy cover the failure modes that
+actually happen. Stay there as long as it keeps being true. The signals
+that it's stopped being true tend to show up as specific, concrete
+events, not vague unease -- one host running out of headroom under real
+load, a deploy that needs to happen without an outage because people are
+actively using the thing, a second team that needs to ship independently
+without stepping on the first team's containers, or a hardware failure
+that actually took something down and everyone found out that "restart
+policy" doesn't cover "the whole box is gone." Any one of those is a
+specific problem Compose has no answer for and Kubernetes was built
+around. Reaching for Kubernetes before any of them has actually happened
+buys you 201 lines of YAML and an operational burden with nothing yet to
+show for it -- which is exactly what this repo's minikube setup is,
+deliberately, as a place to learn the mechanics before you need them for
+real.
+
+## Writing Chapter 10 (Infrastructure as Code, Take One: Pulumi) in Will's voice
+
+### Same resources, different syntax
+
+Everything in Chapters 6 through 8 came from YAML files applied with
+`kubectl apply -f`. `pulumi/__main__.py` in this repo does the same kind
+of thing -- describe a ConfigMap, a Deployment, a Service, hand it to
+Kubernetes -- but as Python instead of YAML:
+
+```python
+config_map = k8s.core.v1.ConfigMap(
+    "graph-api-config",
+    metadata=k8s.meta.v1.ObjectMetaArgs(name="graph-api-config"),
+    data={
+        "UVICORN_LOG_LEVEL": "info",
+        "UVICORN_PORT": "8000",
+    },
+)
+```
+
+Read past the class names and this is the same shape as
+`postgres-configmap.yaml`: a name, a `data` dict. The difference isn't
+what's being described, it's what's doing the describing -- a real
+programming language instead of a document format. That distinction
+sounds abstract until you hit the places where YAML has no good answer
+and Python does.
+
+One example already sitting in this file: the Service is `NodePort`
+with no `node_port` pinned, so Kubernetes allocates one from the
+30000-32767 range at apply time -- you don't know it in advance.
+`start.sh`'s answer to that, back in Chapter 6, was a separate shell
+command run after the fact: `kubectl get svc toy-api -o jsonpath=...`.
+Pulumi's answer is to make the allocated port part of the program itself:
+
+```python
+node = k8s.core.v1.Node.get("cluster-node", node_name)
+
+node_ip = node.status.apply(
+    lambda s: next(a.address for a in s.addresses if a.type == "InternalIP")
+)
+node_port = service.spec.apply(lambda s: str(s.ports[0].node_port))
+
+pulumi.export("base_url", pulumi.Output.concat("http://", node_ip, ":", node_port))
+```
+
+`node.status`, `service.spec` -- these aren't plain Python values, they're
+`Output`s, Pulumi's name for "a value that doesn't exist yet because the
+resource that produces it hasn't been created yet." `.apply()` is how you
+say "once this exists, do this with it." The comment right above the
+export line in the actual file explains why that distinction can't be
+skipped: `pulumi.Output.concat` is used deliberately instead of an
+f-string, because an f-string would silently interpolate the Python
+`repr()` of the `Output` object itself rather than the eventual string
+value. That's not a hypothetical gotcha -- it's specific enough that
+whoever wrote this file had clearly been bitten by it once. A YAML
+manifest can't have this problem, because YAML has no concept of "a value
+that will exist later." It also can't hand you a working URL without a
+second, separate shell command to go find the allocated port -- the same
+tradeoff in both directions.
+
+### Type checking and reusable modules
+
+`k8s.core.v1.ConfigMap(...)`, `k8s.apps.v1.DeploymentSpecArgs(...)` --
+every one of these is a real Python class with a real constructor
+signature. Misspell a field name in a YAML manifest and you find out at
+`kubectl apply` time, if you're lucky, or at pod-crash time if you're not.
+Misspell one of these and your editor tells you before you run anything,
+because `DeploymentSpecArgs` doesn't have a `replicaz` parameter and
+static analysis knows it. That's what "type checking" is actually buying
+here -- not a vague quality signal, a concrete class of typo that never
+reaches a cluster.
+
+The same file demonstrates reuse too, if you look at how the Prometheus
+and Grafana blocks lower down are built. They don't share a function with
+the `graph-api` Deployment above them, but they share the same pattern --
+`labels` dict, `Deployment`, `Service`, wired together the same way -- and
+in Python that repetition is a standing invitation to extract a
+`make_deployment(name, image, port, ...)` helper the moment a fourth
+service shows up. A YAML manifest has no equivalent move. You can use
+Helm templates or Kustomize overlays to fight the same duplication, but
+that's reaching for a second tool to patch a gap in the first one. Pulumi
+just uses the language you're already in.
+
+### Where this file actually stands right now
+
+Worth being straight about something: this Pulumi program isn't a clean
+parallel of the toy-api YAML from Chapters 6 through 8. It deploys an
+image called `tg-core-graph-api:local`, from a different exercise
+(`tg-core`) than the `k8s-toy-api:local` this book has been walking
+through, and along the way it's picked up a Prometheus deployment scraping
+`graph-api`'s `/metrics` endpoint and a Grafana deployment wired to that
+Prometheus as its one datasource. None of that was in the file when this
+repo's `README.md` was written -- the README still describes it as
+creating "the exact same ConfigMap + Deployment + Service as the YAML
+manifests," which was true once and isn't anymore.
+
+That gap is worth sitting with rather than quietly fixing before anyone
+notices, because it's a small, harmless instance of a problem that gets
+expensive at real scale: documentation describes the infrastructure as of
+whenever someone last updated the doc, and the infrastructure-as-code
+keeps moving. A YAML manifest and a Pulumi program are both supposed to be
+the source of truth for what's running -- that's the entire pitch of this
+part of the book -- but nothing enforces that a README stays truthful
+about either one. The fix isn't clever tooling, it's the same discipline
+Chapter 2 argued for at the start: if a description of the system lives
+outside the system's own declared state, it drifts, and the only real
+defense is noticing.
+
+### When Pulumi earns its complexity over plain manifests
+
+None of this makes Pulumi strictly better than YAML. It's more machinery:
+a language runtime, a package manager, a state backend that has to be
+reachable and correctly authenticated before `pulumi up` does anything at
+all -- the Pulumi program in this repo is configured against a remote
+backend, and if that backend is unreachable, `pulumi stack ls` fails
+outright before you get anywhere near applying anything. `kubectl apply -f
+service.yaml` has no equivalent failure mode; the manifest is the state.
+
+The honest answer for when the extra machinery is worth it: once a
+project has more than a handful of resources, once the same shapes
+(a Deployment plus a Service plus a ConfigMap, over and over) start
+repeating across services, or once "I made a typo in a field name" has
+actually cost someone a debugging session, a real language starts paying
+for itself. A single toy API with one ConfigMap doesn't need it. This
+repo's own Pulumi file, three services deep and still growing, is
+starting to sit right at that line.
+
+## Writing Chapter 11 (Observability Basics: Logging) in Will's voice
+
+### One line becomes three, and a pod name you didn't ask for
+
+Hit the running API once, with a request ID attached so it's easy to
+pick back out of the noise:
+
+```shell
+curl -s -H "X-Request-ID: book-demo-0001" \
+  "http://${MINIKUBE_IP}:${NODE_PORT}/api/v1/items"
+```
+
+Then go looking for it in the logs of both `toy-api` pods:
+
+```shell
+for pod in $(kubectl get pods -l app=toy-api -o jsonpath='{.items[*].metadata.name}'); do
+  echo "=== $pod ==="
+  kubectl logs "$pod" --since=30s | grep book-demo-0001
+done
+```
+
+```
+=== toy-api-6fc5ddfd6d-7gn64 ===
+=== toy-api-6fc5ddfd6d-b9kvv ===
+{"timestamp": "2026-09-07T18:47:23.462567Z", "level": "info", "message": "request started", "request_id": "book-demo-0001", "pod": "toy-api-6fc5ddfd6d-b9kvv", "method": "GET", "path": "/api/v1/items", "client": "10.244.0.1"}
+{"timestamp": "2026-09-07T18:47:23.469232Z", "level": "info", "message": "items listed", "request_id": "book-demo-0001", "pod": "toy-api-6fc5ddfd6d-b9kvv", "count": 2}
+{"timestamp": "2026-09-07T18:47:23.471122Z", "level": "info", "message": "request completed", "request_id": "book-demo-0001", "pod": "toy-api-6fc5ddfd6d-b9kvv", "method": "GET", "path": "/api/v1/items", "status": 200}
+```
+
+One `curl`, three log lines, and nothing came out of `toy-api-...-7gn64`
+at all -- the request landed on `b9kvv` because that's whichever pod
+`kube-proxy` happened to route it to, same randomness from Chapter 7.
+Nobody chose that pod on purpose and the request didn't care which one
+answered, but once you're debugging instead of just calling the API, you
+suddenly do care, and `request_id` is the only thing that ties the three
+lines together as one event rather than three unrelated ones.
+
+That correlation isn't automatic. Open `app.py` and it's exactly two
+pieces of machinery: a `ContextVar` holding the current request's ID, and
+`RequestIDMiddleware`, which reads `X-Request-ID` off the incoming
+request (or generates a UUID if the caller didn't send one), sets it in
+that ContextVar, and echoes it back in the response headers. Every
+`logger.info(...)` call downstream, in every endpoint, picks it up for
+free through `JSONFormatter`, because the formatter reads the same
+ContextVar on every single line it emits:
+
+```python
+request_id = request_id_ctx.get()
+if request_id:
+    log_data["request_id"] = request_id
+```
+
+That's the whole trick. No log line anywhere in `app.py` passes
+`request_id` explicitly -- `logger.info("items listed", extra={"count": len(items)})`
+in the items endpoint has no idea what request it's part of. The
+formatter fills that in from context, on every line, unconditionally.
+Miss wiring that ContextVar into some new code path -- a background task,
+a second thread -- and its log lines quietly stop carrying a `request_id`
+at all, with nothing to warn you.
+
+### The line the endpoint wrote vs. the line the formatter added
+
+Try a request that fails on purpose:
+
+```shell
+curl -s -o /dev/null -w "%{http_code}\n" \
+  -H "X-Request-ID: book-demo-404" \
+  "http://${MINIKUBE_IP}:${NODE_PORT}/api/v1/items/does-not-exist"
+```
+
+```
+404
+```
+
+```json
+{"timestamp": "2026-09-07T18:47:33.879184Z", "level": "info", "message": "request started", "request_id": "book-demo-404", "method": "GET", "path": "/api/v1/items/does-not-exist", "client": "10.244.0.1"}
+{"timestamp": "2026-09-07T18:47:33.881006Z", "level": "warning", "message": "item not found", "request_id": "book-demo-404", "item_id": "does-not-exist"}
+{"timestamp": "2026-09-07T18:47:33.881569Z", "level": "info", "message": "request completed", "request_id": "book-demo-404", "method": "GET", "path": "/api/v1/items/does-not-exist", "status": 404}
+```
+
+The middle line is the one that actually says something -- `logger.warning("item not found", extra={"item_id": item_id})`,
+written by hand in the `get_item` endpoint, one call, one string, one
+extra field. Everything else on that line -- `timestamp`, `level`,
+`service`, `pod`, `request_id` -- came from `JSONFormatter` without the
+endpoint author having to think about any of it. That split is the actual
+point of structured logging: the application code stays down at "here's
+what happened" (`item not found`, `does-not-exist`), and the formatter's
+job is making sure every line, no matter which of the dozen or so
+`logger.info`/`logger.warning` calls scattered through `app.py` produced
+it, comes out shaped the same way and carries the same request-level
+context. `grep`-ing plain text for an error means guessing at a string.
+Piping this through `jq 'select(.level=="warning")'` means asking a
+question the log already knows the answer to.
+
+Not every field on that line is one you'd choose on purpose, though.
+Look closely at the full JSON as it actually comes out of the pod --
+there's a `taskName` field in there too, something like
+`"taskName": "starlette.middleware.base.BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.coro"`.
+That's `JSONFormatter` doing exactly what it's written to do -- copying
+every attribute off the `LogRecord` that isn't on its exclusion list --
+and asyncio happens to stash the current task's name on the record under
+a key nobody thought to exclude. It's harmless here, just noise, but it's
+a fair warning about the "log everything on the record" approach: the
+formatter doesn't know the difference between a field you meant to add
+and one the runtime left lying around.
+
+### Where the trail actually ends
+
+Send one more request, note which pod answers, and delete that pod on
+purpose:
+
+```shell
+curl -s -o /dev/null -H "X-Request-ID: book-demo-vanish" \
+  "http://${MINIKUBE_IP}:${NODE_PORT}/api/v1/items"
+kubectl logs toy-api-6fc5ddfd6d-7gn64 --since=30s | grep book-demo-vanish
+```
+
+```json
+{"timestamp": "2026-09-07T18:47:43.309449Z", "level": "info", "message": "request started", "request_id": "book-demo-vanish", "pod": "toy-api-6fc5ddfd6d-7gn64", ...}
+{"timestamp": "2026-09-07T18:47:43.312656Z", "level": "info", "message": "items listed", "request_id": "book-demo-vanish", "pod": "toy-api-6fc5ddfd6d-7gn64", "count": 2}
+{"timestamp": "2026-09-07T18:47:43.313184Z", "level": "info", "message": "request completed", "request_id": "book-demo-vanish", "pod": "toy-api-6fc5ddfd6d-7gn64", ...}
+```
+
+The line's there, plainly, with the pod's name right on it. Now delete
+that pod the same way Chapter 7 did, wait for its replacement, and ask
+for the same logs again:
+
+```shell
+kubectl delete pod toy-api-6fc5ddfd6d-7gn64
+kubectl wait --for=condition=ready pod -l app=toy-api --timeout=60s
+kubectl logs toy-api-6fc5ddfd6d-7gn64
+```
+
+```
+error: error from server (NotFound): pods "toy-api-6fc5ddfd6d-7gn64" not found in namespace "default"
+```
+
+Gone. Not "gone from the default view, still there if you dig" -- gone.
+`kubectl logs` reads from the node, keyed on a pod that no longer exists,
+and the Deployment controller's whole job, going all the way back to
+Chapter 7, is making sure that pod's replacement gets a new name. The
+same mechanism that makes Kubernetes self-healing is what makes
+`kubectl logs` alone useless for anything you need to look back on. A
+crash worth debugging is exactly the kind of event likely to have killed
+the pod that logged it.
+
+`LOGGING.md` calls this "node-level logging" and lists Loki or the EFK
+stack as the fix: ship every line off the node to something with its own
+retention, before the pod that wrote it disappears. Nothing about that
+requires changing a single line in `app.py`. The JSON is already there,
+already structured, already carrying `request_id` and `pod` on every
+line -- Promtail or Fluentd's whole job is reading what's already being
+written to stdout and shipping it somewhere that outlives the pod. The
+logging code in this repo was written for that day already; today it's
+just not running yet.
