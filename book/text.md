@@ -1940,3 +1940,184 @@ ServiceAccount, with nothing granted, is what "too little" looks like when
 nothing was ever asked for. A real operator sits somewhere in between,
 and getting that middle right is a RoleBinding written on purpose, not a
 default nobody thought about.
+
+# Git as the Control Plane
+
+## The inversion
+
+Every deployment so far in this book has been a push. `kubectl apply -f
+deployment.yaml` from Chapter 6 onward means: something outside the
+cluster -- a person, a script -- has credentials for the cluster and
+sends it a command. The cluster is passive. It waits to be told.
+
+GitOps inverts that. Instead of something outside the cluster pushing
+changes in, something *inside* the cluster watches a git repository and
+pulls changes toward itself, continuously, on its own schedule. Nobody
+outside the cluster needs credentials for the cluster at all -- they need
+credentials for git, which is a fundamentally smaller thing to leak or
+misuse. `deployment.yaml` doesn't change. What changes is who's holding
+the "apply" button, and it turns out the answer "a controller running
+inside the cluster, watching git" is both more secure and more auditable
+than "whoever currently has `kubectl` access."
+
+More auditable because every change is now a commit -- Chapter 2's
+whole argument, version control as a security control, showing up again
+here as the mechanism rather than the abstract principle. More secure
+because push credentials are the more dangerous kind: a leaked
+`kubectl` config is a direct line into the cluster, while a leaked git
+read token gets an attacker a copy of some YAML, not a shell. The
+worst a compromised git credential can do is see what's already
+supposed to be public inside the team, or, if it's a write credential,
+propose a change that still has to pass through commit history and,
+ideally, review -- not silently reach into the cluster and start
+deleting things.
+
+## ArgoCD's loop is the same loop
+
+This isn't a new idea bolted onto Kubernetes. It's Chapter 5's control
+loop, run one level up:
+
+```
+loop forever:
+    desired = read the git repo
+    actual  = observe the cluster
+    if desired != actual:
+        act to close the gap
+```
+
+Compare that to the loop Chapter 5 wrote for the Deployment controller --
+identical shape, different source for `desired`. The Deployment
+controller reads its spec from etcd; ArgoCD reads its spec from a git
+remote. Both are controllers, in the exact sense Chapter 5 used the word:
+something that watches, diffs, and acts, running inside the cluster,
+indefinitely, without anyone re-triggering it. ArgoCD isn't a CI/CD tool
+bolted onto Kubernetes from outside -- it's a Kubernetes-native controller
+whose one job is polling an external system (git) instead of watching
+another API object, then reconciling exactly the way every other
+controller in this book already does.
+
+## Hands-on: this repo, deployed by ArgoCD, for real
+
+This book has a second cluster running alongside the minikube one from
+every earlier chapter -- a `kind` cluster, with ArgoCD installed, and a
+Gitea instance holding a mirror of this repo. `argocd-k8s-hack.yaml`,
+sitting at the root of this repo, is the ArgoCD `Application` object that
+ties them together:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: k8s-hack
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: http://172.22.0.3:3000/wware/k8s-hack.git
+    targetRevision: main
+    path: .
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+```
+
+`repoURL` is Gitea's address on the `kind` network -- `172.22.0.3`, not
+`localhost`, because ArgoCD is asking for that address from inside a pod,
+and `localhost` from inside a pod means the pod itself. `targetRevision:
+main` is the whole of "what ArgoCD should watch." Everything after that
+is ArgoCD's job, not this repo's.
+
+Prove it by actually moving git and watching the cluster follow. `main`
+currently has `replicas: 2` in `deployment.yaml`. Change it, commit,
+push:
+
+```shell
+git checkout main
+# edit deployment.yaml: replicas: 2 -> replicas: 3
+git commit -am "Scale toy-api to 3 replicas"
+git push gitea main
+```
+
+ArgoCD polls every three minutes by default; force it to look now
+instead of waiting, the same way a person clicking "Refresh" in the UI
+would:
+
+```shell
+kubectl patch application k8s-hack -n argocd --type merge \
+  -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}'
+```
+
+```shell
+kubectl get pods -n default -l app=toy-api
+```
+
+```
+NAME                       READY   STATUS    RESTARTS   AGE
+toy-api-8467757567-kglph   1/1     Running   0          19s
+toy-api-8467757567-kx8t6   1/1     Running   0          18d
+toy-api-8467757567-wpsph   1/1     Running   0          18d
+```
+
+A third pod, 19 seconds old, next to two that have been running for
+eighteen days. Nobody ran `kubectl apply`. Nobody but ArgoCD touched this
+cluster -- the only thing that changed was a file in a git repository,
+and a controller running inside the cluster noticed and closed the gap
+on its own.
+
+## What "the cluster is passive" actually buys
+
+Push that a step further. Manually scale the same Deployment directly,
+bypassing git entirely, the way an incident responder under pressure
+might:
+
+```shell
+kubectl scale deployment/toy-api -n default --replicas=5
+```
+
+```shell
+kubectl get pods -n default -l app=toy-api
+```
+
+```
+NAME                       READY   STATUS        RESTARTS   AGE
+toy-api-8467757567-97htw   0/1     Terminating   0          3s
+toy-api-8467757567-wpsph   1/1     Running       0          18d
+toy-api-8467757567-w4kb9   0/1     Terminating   0          3s
+toy-api-8467757567-kglph   1/1     Running       0          40s
+toy-api-8467757567-kx8t6   1/1     Running       0          18d
+```
+
+Two of the five pods this command just started are already
+`Terminating` before they even finish coming up. This Application has
+`selfHeal: true` set -- the syncPolicy block from `argocd-k8s-hack.yaml`
+above -- so ArgoCD isn't waiting for anyone to notice the drift and click
+Sync. It's actively defending git's declared state against exactly the
+kind of manual change that just happened, correcting it faster than the
+new pods could finish starting:
+
+```shell
+kubectl get pods -n default -l app=toy-api
+```
+
+```
+NAME                       READY   STATUS    RESTARTS   AGE
+toy-api-8467757567-kglph   1/1     Running   0          66s
+toy-api-8467757567-kx8t6   1/1     Running   0          18d
+toy-api-8467757567-wpsph   1/1     Running   0          18d
+```
+
+Back to three, matching git, within seconds of the manual scale command
+completing. `kubectl apply` from Chapter 5 through Chapter 12 always won
+-- it was the only thing touching the cluster's desired state. Here it
+loses, immediately, to whatever git says, because git is the actual
+source of truth and `kubectl scale` was never anything more than a
+temporary, local lie about it. That's the practical payoff of the
+inversion this chapter opened with: the cluster no longer trusts
+whoever's holding a terminal. It trusts a git remote, continuously,
+whether or not anyone's watching.

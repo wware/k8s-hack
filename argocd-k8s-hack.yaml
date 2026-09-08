@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: k8s-hack
+  namespace: argocd
+spec:
+  project: default
+  source:
+    # Gitea repository URL (from inside the kind network)
+    repoURL: http://172.22.0.3:3000/wware/k8s-hack.git
+    targetRevision: main
+    # Path within the repo where your manifests live
+    path: .  # or manifests/, deploy/, k8s/, etc.
+  destination:
+    server: https://kubernetes.default.svc
+    # Namespace where your app will be deployed
+    namespace: default  # or create a new namespace
+  syncPolicy:
+    automated:
+      prune: false  # Start with false, enable later
+      selfHeal: false  # Start with false, enable later
+    syncOptions:
+      - CreateNamespace=true
