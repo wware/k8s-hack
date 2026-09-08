@@ -1,195 +1,6 @@
-# K8s/GitOps book
+# From Pet Servers to Cattle
 
-This repository, along with `../gitops-lab` and `../gitops_reconciler`, form an arc:
-
-- Start with understanding k8s and how it works
-- Understand how gitops extends the pattern into the devops space
-- Generalize the k8s/gitops pattern beyond k8s to other deployments
-
-I'm interested in making this a book with reference to these repositories on GitHub.
-
-## Table of Contents (draft outline)
-
-### Part I -- Why Any of This Exists
-
-1. **From Pet Servers to Cattle**
-   - The old world: SSH in, hand-edit a config, restart a service, hope you remember what you did
-   - Snowflake servers and the "it works on my machine (in production)" problem
-   - Configuration drift: why two "identical" servers never stay identical
-   - The rise of automation: Puppet/Chef/Ansible as the first wave of "describe, don't do"
-   - Brief history: physical servers → VMs → containers → orchestrated containers
-
-2. **The Security Case for Systematized Infrastructure**
-   - Why ad-hoc ops was always risky, and why it's *more* risky now
-   - Bad actors have industrialized: automated scanning, supply-chain attacks, ransomware-as-a-service
-   - Manual changes = unaudited changes: no diff, no review, no rollback
-   - Version-controlled infrastructure as a security control, not just a convenience
-   - Principle of least surprise: if it's not in git, it shouldn't be running
-   - Preview of where this book is headed: version control as the spine connecting every chapter
-
-### Part II -- Containers Before Orchestration
-
-3. **Docker: Packaging Reality**
-   - What a container actually is (namespaces, cgroups, union filesystems) -- just enough to demystify it
-   - Images vs. containers; the Dockerfile as a recipe, not a script
-   - A short history: chroot → LXC → Docker's breakout moment (2013) → OCI standardization
-   - Why "works in the container" is a stronger claim than "works on my machine"
-   - Learning links: Docker's own "Get Started" guide, *The Docker Book*, OCI spec overview
-
-4. **Docker Compose: Orchestration's Training Wheels**
-   - Multi-container apps without a cluster: `docker-compose.yml` as a mini-manifest
-   - What Compose gets right: local dev parity, one-command spin-up, readable YAML
-   - What Compose can't do: multi-host scheduling, self-healing across machines, rolling updates with real health gating, no built-in service mesh/networking across hosts
-   - Walkthrough: this repo's `docker-compose.yml` (FastAPI + Postgres) as the running example
-   - Why Compose is the right tool until it isn't -- and how you'll feel the ceiling
-
-### Part III -- Kubernetes Fundamentals *(k8s-hack)*
-
-5. **What Kubernetes Actually Is**
-   - The control loop idea: desired state vs. observed state, reconciled continuously
-   - Why this is fundamentally different from "run a script when something changes"
-   - Anatomy of a cluster: API server, etcd, scheduler, controllers, kubelet -- at a glance
-   - Mapping Compose concepts onto K8s: `docker-compose.yml` → Deployment + Service + ConfigMap + Secret
-
-6. **Your First Deployment**
-   - `./start.sh` and the "aha" moment: containers + orchestration, not magic
-   - Deployments, Services, and the separation of "what runs" from "how it's reached"
-   - StatefulSets and why databases aren't just "a Deployment with a volume"
-   - Hands-on: deploying the toy API + Postgres from this repo
-   - The YAML files as promises kept: walking every file in deployment order --
-     ConfigMap, Secret, PVC, StatefulSet, headless Service, Deployment, Service
-     -- as the visible evidence of one guarantee apiece, not just boilerplate
-   - Where the promises run out: a bare StatefulSet's guarantees stop at
-     identity and storage -- nothing about replication, failover, or backups.
-     That gap is part of Chapter 9's subject
-
-7. **Self-Healing and Scaling**
-   - Deleting a pod on purpose and watching Kubernetes notice
-   - Declarative intent: "2 replicas" as a standing order, not a one-time command
-   - Horizontal scaling for stateless apps vs. why stateful scaling is hard
-   - Load balancing across replicas, observed via logs
-
-8. **Configuration, Secrets, and Storage**
-   - ConfigMaps and Secrets: config outside the image, decoupled from rebuilds
-   - PersistentVolumeClaims: storage that outlives the pod
-   - Hands-on: editing config, restarting pods, confirming the new values land
-
-9. **When *Not* to Use Kubernetes**
-    - Referenced doc: `WHY_KUBERNETES.md`
-    - Operational cost: what running K8s well actually requires (a team, not a weekend)
-    - Signs you don't need it yet, and signs you're about to
-
-10. **Infrastructure as Code, Take One: Pulumi**
-    - Same resources, different syntax: YAML manifests vs. a real programming language
-    - Type checking, reusable modules, and why this starts to matter at scale
-    - When Pulumi (or Terraform, CDK, etc.) earns its complexity over plain manifests
-
-11. **Observability Basics: Logging**
-    - Referenced doc: `LOGGING.md`
-    - stdout → DaemonSet → aggregator (Loki or similar) as the modern evolution of syslog
-    - Structured JSON logs and why correlation across services depends on them
-
-12. **Authentication and Authorization Patterns**
-    - Referenced doc: `AUTH.md`
-    - Where auth lives in a K8s-deployed app vs. where cluster RBAC lives -- two different concerns often confused
-
-### Part IV -- GitOps: Extending the Pattern into DevOps *(gitops-lab)*
-
-13. **Git as the Control Plane**
-    - The inversion: `kubectl apply` (push) vs. "commit and let the cluster notice" (pull)
-    - Why pull-based deployment is more secure and more auditable
-    - ArgoCD's reconciliation loop, mapped back onto the control-loop idea from Chapter 5
-    - Hands-on: kind + ArgoCD + Gitea local setup
-
-14. **Drift Detection and Self-Healing at the Fleet Level**
-    - Manually scaling a Deployment and watching ArgoCD flag it OutOfSync
-    - Enabling self-heal: the cluster actively defends the git-declared state
-    - Cluster state vs. git state as a permanent, visible diff -- not a one-time audit
-
-15. **Multi-Environment Deployment Without the Copy-Paste**
-    - ApplicationSets: one template, many environments (dev/staging/prod)
-    - Why hand-maintained per-environment YAML rots, and how templating prevents it
-
-16. **Autoscaling on Real Signal: KEDA**
-    - CPU-based autoscaling's blind spot: bursty, queue-driven workloads
-    - Scale 0→N on queue depth, and back to 0 -- paying for actual work, not idle capacity
-    - Hands-on: RabbitMQ + KEDA-scaled workers
-
-17. **The Cost/Complexity Decision**
-    - Option A: Single-box autoscaling -- cheapest, simplest, no HA
-    - Option B: AWS Auto Scaling Groups -- cheap, AWS-native, scaling lag
-    - Option C: Real EKS -- expensive, complex, industry-standard, justified past a certain team/scale threshold
-    - A decision framework, not a default answer: matching infrastructure to actual need (echoes Chapter 9)
-
-18. **Side Quests**
-    - EKS emulation on a home LAN (kubeadm + MetalLB): learning multi-node mechanics without AWS bills
-    - Queue-based scaling as a portable pattern (SQS/Kafka/Redis -- same idea everywhere)
-
-### Part V -- Beyond Kubernetes: Generalizing the Pattern *(gitops_reconciler)*
-
-19. **GitOps Without a Cluster**
-    - The insight: Kubernetes just happens to supply a free, live, self-diffing control plane
-    - Every other target (Terraform, Pulumi, CloudFormation, Compose, a Raspberry Pi) needs the reconciliation loop built explicitly
-    - Introducing the `BackEnd` ABC: `apply()`, `destroy()`, `get_outputs()` -- three methods, one shared shape
-
-20. **Design Decisions, and Why They Were Made That Way**
-    - Why there's no `plan()`/dry-run method: idempotent `apply()` already pays the diff cost
-    - Why "refresh" logic lives inside each backend, not the shared interface
-    - Why there's no human-approval gate on the interface itself (and where that gate *does* belong)
-    - Why pull-vs-push scheduling is a wrapper concern, and convergence is a backend concern -- keeping layers honest
-
-21. **Credentials and Blast Radius**
-    - Why the reconciler should run on a separate control machine from what it manages
-    - Short-lived STS/instance-role credentials over static keys
-    - The exception that proves the rule: a Raspberry Pi managing itself, where there's no privilege boundary worth protecting
-
-22. **Progressive Delivery Without New Abstractions**
-    - Staging tracks `:latest`; production pins to a validated SHA
-    - The promotion script: reading staging's last-applied SHA, rewriting prod's pin, committing
-    - Why staging and prod never talk to each other directly -- git remains the only shared state
-    - This is the same pattern as Chapter 14's drift detection, just with a human-gated promotion step inserted
-
-### Part VI -- Putting It Together
-
-23. **One Pattern, Three Substrates**
-    - Recap: declare → observe → reconcile, instantiated in Docker Compose, Kubernetes/ArgoCD, and the generic reconciler
-    - A comparison table: what each substrate buys you and what it costs
-    - Choosing a substrate for a new project: a checklist derived from Chapters 10 and 17
-
-24. **What Still Isn't Covered**
-    - Secrets management at scale (External Secrets, SOPS)
-    - Full observability stack (Prometheus, Grafana, Loki, AlertManager)
-    - RBAC, network policies, image scanning, supply-chain attestation
-    - Pointers for further reading, framed as the security posture argued for in Chapter 2
-
-### Appendices
-
-- **A. Command Reference** -- `docker`, `docker compose`, `kubectl`, `pulumi`, `argocd` cheat sheets
-- **B. Glossary** -- reconciliation loop, desired state, drift, StatefulSet, ApplicationSet, etc.
-- **C. Repository Map** -- how `k8s-hack`, `gitops-lab`, and `gitops_reconciler` relate, with a suggested reading order per chapter
-
-## Trajectory for the book
-
-Eventually I'll want something like a printed book you can hold in your hand,
-with an ISBN, and a corresponding e-book in the Kindle store. For now it's more
-practical to think in terms of an 8.5x11 home-made book that gets spiral-bound
-at Staples. The spiral-bound book can be produced in small quantities, shared,
-marked up by friendly readers.
-
-I want to avoid AI-sounding language (em-dash, "load bearing', etc) and writing
-tone that's very different from mine. Probably I'd have Claude write a preliminary
-draft of the book, then rewrite pieces in my own voice over time, before going
-to anything like a real printing or publishing.
-
-But em-dashes and "load-bearing" are symptoms, not the disease. The deeper tell is
-usually: every section has the same rhythm (setup / insight / payoff),
-everything is hedged with "it's worth noting," and abstractions get restated
-instead of just used. So later we will look at these structural patterns and try
-to break them up.
-
-## Writing Chapter 1 (From Pet Servers to Cattle) in Will's voice
-
-### SSH in, hand-edit, restart, hope
+## SSH in, hand-edit, restart, hope
 
 The old workflow doesn't need much reconstruction because most people who'd
 pick up this book have lived some version of it: `ssh` into the box, `vim`
@@ -206,7 +17,7 @@ comment you left in the file, if you left one. Six months later, "why is
 this set to 30 instead of the default of 10" has one honest answer: ask
 whoever did it, if they still work there, if they remember.
 
-### Snowflakes, and the gap between "works" and "works reliably"
+## Snowflakes, and the gap between "works" and "works reliably"
 
 Do this enough times, on enough servers, and every server drifts into
 being slightly different from every other one -- not because anyone
@@ -230,7 +41,7 @@ into agreement, so unless someone is deliberately auditing for drift --
 and auditing for drift by hand doesn't scale past a small number of
 servers -- they just keep diverging.
 
-### Describe, don't do
+## Describe, don't do
 
 Puppet, Chef, and Ansible were the first widely-adopted answer to this,
 and the shift they represent is worth naming precisely, because it's the
@@ -253,7 +64,7 @@ still had to remember to run them. But the core move -- write down what
 the machine should look like, then let a tool make it true -- is the same
 move every chapter after this one keeps making at a larger scope.
 
-### Physical servers to orchestrated containers, briefly
+## Physical servers to orchestrated containers, briefly
 
 The rest of this progression is really the same idea, applied one layer
 up each time, as the unit being managed keeps shrinking and multiplying:
@@ -278,9 +89,9 @@ and keep desired counts correct, continuously, faster than any person
 could do it by hand. That something is the subject of the rest of this
 book.
 
-## Writing Chapter 2 (The Security Case for Systematized Infrastructure) in Will's voice
+# The Security Case for Systematized Infrastructure
 
-### Ad-hoc ops was always risky
+## Ad-hoc ops was always risky
 
 Chapter 1 made the productivity case against hand-edited servers: drift,
 lost context, nobody quite sure what's actually running. All of that is
@@ -292,7 +103,7 @@ happen*. An unauthorized change and an authorized-but-undocumented change
 look identical from the outside -- neither one shows up anywhere except
 in what the server is currently doing.
 
-### Why it's worse now
+## Why it's worse now
 
 Two things changed the stakes on top of that baseline risk. First, attack
 tooling industrialized. Scanning the entire public IPv4 address space for
@@ -315,7 +126,7 @@ sophisticated actors. The threat model isn't "a skilled attacker might
 target us specifically" anymore. It's "automated tooling will find
 whatever's exposed, and someone downstream will monetize it."
 
-### No diff, no review, no rollback
+## No diff, no review, no rollback
 
 Put those two together and the hand-edited server from Chapter 1 stops
 being merely inefficient and starts being a liability, for a specific,
@@ -338,7 +149,7 @@ that used to lack one. It's the existing discipline of code review and
 version control, already trusted for the application, extended to cover
 the infrastructure that application runs on.
 
-### If it's not in git, it shouldn't be running
+## If it's not in git, it shouldn't be running
 
 That's the principle worth carrying into every chapter after this one,
 because it's going to come back explicitly more than once: version
@@ -349,14 +160,14 @@ and why" always has an answer. A system where changes can still be made
 by hand, outside that record, has a permanent, unfixable gap between what
 the repository says and what's actually true -- and that gap is exactly
 where both Chapter 1's drift problem and this chapter's security problem
-live. Chapter 9 is going to spend real time on what happens once that gap
+live. Chapter 14 is going to spend real time on what happens once that gap
 gets automated away entirely, git no longer just describing infrastructure
 but actively defending it. Everything between here and there is really
 this same idea, worked out at increasing scale.
 
-## Writing Chapter 3 (Docker: Packaging Reality) in Will's voice
+# Docker: Packaging Reality
 
-### What a container actually is, briefly
+## What a container actually is, briefly
 
 A container is not a lightweight virtual machine, even though it gets
 described that way often enough that the description sticks. A VM
@@ -383,7 +194,7 @@ making the packaging and distribution of the result trivial: a
 `Dockerfile`, a build command, and an image anyone else can pull and run
 without caring how any of those three mechanisms actually work.
 
-### Images vs. containers, and the Dockerfile as a recipe
+## Images vs. containers, and the Dockerfile as a recipe
 
 The distinction that trips people up first: an image is not a container,
 it's what a container is made from. This repo's `Dockerfile` is short
@@ -437,7 +248,7 @@ in the specific sense that each step describes an incremental change to
 apply on top of the last one, not a script that runs top to bottom and
 discards its intermediate state.
 
-### A short history, and why "works in the container" is a stronger claim
+## A short history, and why "works in the container" is a stronger claim
 
 `chroot` gave a process its own root filesystem view in 1979 -- the
 oldest of these three mechanisms by a wide margin, and proof this idea
@@ -467,7 +278,7 @@ committed file instead -- so it's worth having Chapter 3 be the place
 that move first gets named plainly, at the smallest possible scale, one
 image.
 
-### Further reading
+## Further reading
 
 Docker's own "Get Started" guide is still the fastest way to build the
 muscle memory for `build`/`run`/`exec` before any of the orchestration
@@ -478,9 +289,9 @@ The OCI image spec itself, for anyone who wants to see exactly what
 enough to read in one sitting and worth it once namespaces and cgroups
 stop being new.
 
-## Writing Chapter 4 (Docker Compose: Orchestration's Training Wheels) in Will's voice
+# Docker Compose: Orchestration's Training Wheels
 
-### One file, two services, one command
+## One file, two services, one command
 
 `docker-compose.yml` in this repo describes the same two-service app
 Chapter 3 built one image for -- `postgres` and `api` -- as a single YAML
@@ -532,8 +343,8 @@ That "Waiting" line is `depends_on: condition: service_healthy` actually
 doing something, not just documentation -- `api` doesn't start until
 `postgres`'s own `healthcheck` (`pg_isready`) reports healthy, because
 `api` connects to the database on startup and gains nothing by racing it.
-Both containers come up healthy, and the API works exactly as it did
-under Kubernetes in Chapter 6:
+Both containers come up healthy, and the API works exactly as it will
+under Kubernetes later in this book:
 
 ```shell
 curl -s http://localhost:8000/api/v1/healthz
@@ -553,20 +364,20 @@ container ID (`f2e4d42dc861`) instead of a Kubernetes pod name, because
 the container ID the same way Kubernetes sets it to the pod name. The
 logging code doesn't know or care which one it's running under.
 
-### What Compose gets right
+## What Compose gets right
 
 This is the whole deployment: one file, one command, and a `docker-compose.yml`
 that a new developer can read top to bottom in under a minute and
 understand exactly what's going to run. There's no cluster to provision
-first, no separate image-loading step the way `minikube image load`
-needed one in Chapter 6 -- Compose builds straight from the Dockerfile
+first, no separate image-loading step -- Kubernetes will need one later,
+a `minikube image load` -- Compose builds straight from the Dockerfile
 and runs it on the same Docker daemon, immediately. That's real, and it's
 why Compose is still the right answer for local development even on a
 project that deploys to Kubernetes in production: the fastest path from
 "clone the repo" to "the app is running and I can poke at it" almost
 never runs through a cluster.
 
-### Where the ceiling actually is
+## Where the ceiling actually is
 
 Push on it a little and the ceiling stops being theoretical. Ask Compose
 for three copies of `api` instead of one:
@@ -612,14 +423,14 @@ positioned to ask.
 Rolling updates hit a version of the same wall. `docker compose up
 --build` after changing `app.py` stops the old `api` container and starts
 a new one -- not simultaneously, not with the old one kept alive until the
-new one proves itself healthy, the way Chapter 8 watched a bad
-`ConfigMap` change get rejected by Kubernetes without ever taking `toy-api`
-down. Compose's healthcheck exists and works, as `postgres`'s did above,
+new one proves itself healthy. Chapter 8 will show Kubernetes rejecting a
+bad `ConfigMap` change this same way, without ever taking `toy-api` down.
+Compose's healthcheck exists and works, as `postgres`'s did above,
 but nothing in Compose reads it to decide whether it's safe to remove an
 old container yet. That gating logic is exactly what a Deployment's
 rolling update adds on top of the same healthcheck idea.
 
-### The right tool until it isn't
+## The right tool until it isn't
 
 None of this makes `docker-compose.yml` worse than the seven YAML files
 from Chapter 9's comparison -- it's 41 lines against 201, and for a
@@ -634,9 +445,9 @@ there's a full Kubernetes deployment to compare it against squarely. For
 now, the ceiling is the point: everything Compose can't do in this
 chapter is a preview of what the next several chapters exist to fix.
 
-## Writing Chapter 5 (What Kubernetes Actually Is) in Will's voice
+# What Kubernetes Actually Is
 
-### The control loop, not the orchestrator
+## The control loop, not the orchestrator
 
 Chapter 4 ended at Compose's ceiling: one host, and nothing watching over
 it once `docker compose up` returns. That second part is the real gap.
@@ -674,7 +485,7 @@ anticipated failures -- it just keeps rechecking, so anything that
 knocks `actual` out of line with `desired` gets corrected the same way,
 whether you predicted it or not.
 
-### The control plane is not magic -- it's pods
+## The control plane is not magic -- it's pods
 
 Ask this cluster what's actually running its control plane:
 
@@ -729,7 +540,7 @@ the right pods. Nothing here is a black box. It's the same watch-diff-act
 loop from the last section, six times, each instance responsible for one
 slice of "does reality match the spec."
 
-### Mapping what you already know
+## Mapping what you already know
 
 Chapter 4 walked through this repo's `docker-compose.yml` -- two
 services, `postgres` and `api`, each described by roughly a dozen lines.
@@ -759,16 +570,16 @@ to be available, for as long as the cluster exists. Same information,
 different verb tense -- Compose says "do this," Kubernetes says "keep
 this true."
 
-## Writing Chapter 6 (Your First Deployment) in Will's voice
+# Your First Deployment
 
-### `./start.sh`: containers + orchestration, not magic
+## `./start.sh`: containers + orchestration, not magic
 
 The shell script `start.sh` establishes the prerequisites you'll need for a
 small local Kubernetes setup with Minikube. Simply running this script and
 watching the messages it produces is illuminating.  Useful, important stuff is
 happening, but there is nothing incomprehensible going on.
 
-### Deployments, Services, and the separation of "what runs" from "how it's reached"
+## Deployments, Services, and the separation of "what runs" from "how it's reached"
 
 Open `deployment.yaml` and `service.yaml` side by side. They're two different
 objects because they answer two different questions.
@@ -853,7 +664,7 @@ image and scale back up. Real deployments avoid the whole problem with
 immutable, content-addressed tags -- a git SHA or build digest -- so the
 tag itself is proof of what's running, not just a label that might be stale.
 
-### StatefulSets, and why databases aren't just "a Deployment with a volume"
+## StatefulSets, and why databases aren't just "a Deployment with a volume"
 
 The toy API is a Deployment. Postgres is a StatefulSet. They look almost
 identical in the YAML -- same containers, same probes, same resource limits --
@@ -942,7 +753,7 @@ value is the data sitting on disk, tied to one specific process. The
 StatefulSet exists to preserve exactly that identity: this pod, this volume,
 every time.
 
-### Hands-on: deploying the toy API + Postgres from this repo
+## Hands-on: deploying the toy API + Postgres from this repo
 
 `start.sh` runs all of the above, in the order it has to happen. Worth
 reading top to bottom once, because the order isn't arbitrary:
@@ -975,7 +786,7 @@ whole thing looks almost boring: build, load, apply, wait, test, done.
 That's the point. There's no step in here that isn't something you could
 explain to someone else in one sentence.
 
-### The YAML files as promises kept
+## The YAML files as promises kept
 
 Go back through every file `start.sh` applied, but read them a second time
 with a different question in mind: not "what does this field do" but "what
@@ -1010,9 +821,9 @@ replication, nothing about failover if the node running `postgres-0` dies,
 nothing about backups. Real production databases close that gap with an
 Operator sitting on top of the StatefulSet -- more on that later.
 
-## Writing Chapter 7 (Self-Healing and Scaling) in Will's voice
+# Self-Healing and Scaling
 
-### Deleting a pod on purpose and watching Kubernetes notice
+## Deleting a pod on purpose and watching Kubernetes notice
 
 With the toy API and Postgres both running, list the current pods and
 delete one of the `toy-api` ones directly:
@@ -1056,7 +867,7 @@ crashing and killing a pod by accident look identical from the controller's
 point of view: the observed state stopped matching the desired state, so it
 acts.
 
-### Declarative intent: a standing order, not a one-time command
+## Declarative intent: a standing order, not a one-time command
 
 This is different from a script triggered by a commit hook or a CI/CD pipeline.
 A shell script that runs `docker run` twice starts two containers and then it's
@@ -1070,7 +881,7 @@ That's why deleting a pod gets you a replacement but deleting the
 Deployment itself does not -- the standing order is gone, so there's
 nothing left to re-check against.
 
-### Scaling out: easy for the API, meaningless for the database
+## Scaling out: easy for the API, meaningless for the database
 
 Scaling the API is a one-line change in intent:
 
@@ -1147,7 +958,7 @@ far as `postgres-0` is concerned, because it never did -- it was inserted
 into a different process's disk entirely, and that process is gone now
 that `postgres-1` has been scaled away.
 
-### Load balancing across replicas, observed via logs
+## Load balancing across replicas, observed via logs
 
 Back on the API side, scale up again and send a batch of requests at the
 Service, hitting its NodePort directly rather than any one pod:
@@ -1188,9 +999,9 @@ smooth out over a few thousand. The behavior worth internalizing isn't
 "perfectly balanced" -- it's "any of these four processes can answer, and
 the caller never had to know or care which one did."
 
-## Writing Chapter 8 (Configuration, Secrets, and Storage) in Will's voice
+# Configuration, Secrets, and Storage
 
-### Editing a ConfigMap live, and finding the edge of "hot reload"
+## Editing a ConfigMap live, and finding the edge of "hot reload"
 
 `postgres-config` holds the non-secret pieces of the database connection --
 host, port, database name, username -- and `deployment.yaml` wires each one
@@ -1297,7 +1108,7 @@ the previously-healthy old pod it never managed to replace, cleaned up in
 the same rollout once a working replacement finally passed its
 readiness probe.
 
-### PersistentVolumeClaims: storage that outlives the pod
+## PersistentVolumeClaims: storage that outlives the pod
 
 Chapter 6 covered why `postgres-pvc.yaml` exists -- the promise that data
 survives independent of any particular pod. Worth actually watching that
@@ -1338,7 +1149,7 @@ outlives the pod": not magic persistence, just the same PVC getting
 claimed again by whatever process the StatefulSet starts under that name
 next.
 
-### ConfigMap and Secret, side by side
+## ConfigMap and Secret, side by side
 
 `postgres-configmap.yaml` holds four fields -- host, port, database name,
 username. `postgres-secret.yaml` holds exactly one -- the password. Every
@@ -1445,9 +1256,9 @@ should be enough to read a real password -- but that's a problem for a
 later chapter. What this repo demonstrates is the shape of the split, not
 yet the hardened version of it.
 
-## Writing Chapter 9 (When Not to Use Kubernetes) in Will's voice
+# When Not to Use Kubernetes
 
-### The same app, two ways
+## The same app, two ways
 
 This repo has both versions sitting side by side. `docker-compose.yml` is
 41 lines and two services:
@@ -1493,7 +1304,7 @@ the thing Chapter 5 called a control loop: seven times more YAML, plus an
 orchestration script Compose doesn't need at all, to run the same two
 containers on the same one machine.
 
-### What all that extra machinery is buying, here, right now
+## What all that extra machinery is buying, here, right now
 
 Go back through the "why Kubernetes" list from Chapter 5's control-loop
 framing -- multi-host scheduling, self-healing across machines, rolling
@@ -1522,7 +1333,7 @@ Chapter 5. But it's also exactly the shape of the mistake `WHY_KUBERNETES.md`
 warns about: reaching for the fleet-management tool before there's a
 fleet.
 
-### What running Kubernetes well actually requires
+## What running Kubernetes well actually requires
 
 The 201 lines of YAML are the part you write once. The part that doesn't
 show up in any file is what it costs to run this well past a learning
@@ -1541,7 +1352,7 @@ stable storage -- that a StatefulSet actually provides. That's a team's
 worth of ongoing attention, not a weekend project, and it's a cost that
 exists whether or not you're using any of the capacity it buys you.
 
-### Signs you don't need it yet, and signs you're about to
+## Signs you don't need it yet, and signs you're about to
 
 The `docker-compose.yml` in this repo is the honest baseline: one host,
 one team, a healthcheck and a restart policy cover the failure modes that
@@ -1560,9 +1371,9 @@ show for it -- which is exactly what this repo's minikube setup is,
 deliberately, as a place to learn the mechanics before you need them for
 real.
 
-## Writing Chapter 10 (Infrastructure as Code, Take One: Pulumi) in Will's voice
+# Infrastructure as Code, Take One: Pulumi
 
-### Same resources, different syntax
+## Same resources, different syntax
 
 Everything in Chapters 6 through 8 came from YAML files applied with
 `kubectl apply -f`. `pulumi/__main__.py` in this repo does the same kind
@@ -1620,7 +1431,7 @@ that will exist later." It also can't hand you a working URL without a
 second, separate shell command to go find the allocated port -- the same
 tradeoff in both directions.
 
-### Type checking and reusable modules
+## Type checking and reusable modules
 
 `k8s.core.v1.ConfigMap(...)`, `k8s.apps.v1.DeploymentSpecArgs(...)` --
 every one of these is a real Python class with a real constructor
@@ -1643,7 +1454,7 @@ Helm templates or Kustomize overlays to fight the same duplication, but
 that's reaching for a second tool to patch a gap in the first one. Pulumi
 just uses the language you're already in.
 
-### Where this file actually stands right now
+## Where this file actually stands right now
 
 This Pulumi program is not a clean parallel of the toy-api YAML from Chapters 6
 through 8. It deploys an image called `tg-core-graph-api:local`, from a
@@ -1665,7 +1476,7 @@ isn't clever tooling, it's the same discipline Chapter 2 argued for at the
 start: *if a description of the system lives outside the system's own declared
 state, it drifts, and the only real defense is noticing.*
 
-### When Pulumi earns its complexity over plain manifests
+## When Pulumi earns its complexity over plain manifests
 
 None of this makes Pulumi strictly better than YAML. It's more machinery: a
 language runtime, a package manager, a state backend that has to be reachable
@@ -1683,9 +1494,9 @@ when a real language starts paying for itself. A single toy API with one
 ConfigMap doesn't need it. This repo's own Pulumi file, three services deep and
 still growing, is starting to sit right at that line.
 
-## Writing Chapter 11 (Observability Basics: Logging) in Will's voice
+# Observability Basics: Logging
 
-### One line becomes three, and a pod name you didn't ask for
+## One line becomes three, and a pod name you didn't ask for
 
 Hit the running API once, with a request ID attached so it's easy to
 pick back out of the noise:
@@ -1743,7 +1554,7 @@ Miss wiring that ContextVar into some new code path -- a background task,
 a second thread -- and its log lines quietly stop carrying a `request_id`
 at all, with nothing to warn you.
 
-### The line the endpoint wrote vs. the line the formatter added
+## The line the endpoint wrote vs. the line the formatter added
 
 Try a request that fails on purpose:
 
@@ -1789,7 +1600,7 @@ a fair warning about the "log everything on the record" approach: the
 formatter doesn't know the difference between a field you meant to add
 and one the runtime left lying around.
 
-### Where the trail actually ends
+## Where the trail actually ends
 
 Send one more request, note which pod answers, and delete that pod on
 purpose:
@@ -1838,3 +1649,294 @@ line -- Promtail or Fluentd's whole job is reading what's already being
 written to stdout and shipping it somewhere that outlives the pod. The
 logging code in this repo was written for that day already; today it's
 just not running yet.
+
+# Authentication and Authorization Patterns
+
+## Two questions that sound like one
+
+"Who can do that" is actually two unrelated questions once there's a
+Kubernetes cluster involved, and this repo has a clean answer to one of
+them and no answer at all to the other. The first question: who can call
+`toy-api`'s endpoints -- list items, create one, delete one. The second:
+who can run `kubectl apply`, `kubectl delete pod`, or anything else
+against the cluster itself. Nothing about answering one tells you
+anything about the other. A person with full `kubectl` access to this
+cluster can't necessarily call a protected endpoint on `toy-api` if the
+app checks its own credentials separately, and a service with a valid API
+key for `toy-api` has no Kubernetes permissions at all unless someone
+explicitly granted them. They're enforced by different code, at different
+layers, and mixing them up is exactly the confusion this chapter exists
+to clear up.
+
+## The application side: an API key, actually wired in
+
+Before adding anything, check what an anonymous request to `toy-api`
+could do:
+
+```shell
+curl -s -o /dev/null -w "%{http_code}\n" -X DELETE \
+  "http://${MINIKUBE_IP}:${NODE_PORT}/api/v1/items/item1"
+```
+
+```
+200
+```
+
+That's not a hypothetical -- it deleted `item1`, no credentials of any
+kind. `AUTH.md` lays out real options for closing this gap: API keys for
+service-to-service calls, JWTs for anything with a notion of a user,
+OAuth2/OIDC for handing that off to an external identity provider
+entirely, mTLS at the service-mesh layer. API keys are the simplest of
+the four, which makes them the right one to actually wire in here --
+`app.py` gets one new dependency function, applied only to the three
+endpoints that change data:
+
+```python
+async def require_api_key(x_api_key: Annotated[str | None, Header()] = None) -> None:
+    """Gate write endpoints behind a shared API key."""
+    if settings.api_key is None:
+        raise HTTPException(status_code=503, detail="API key not configured")
+    if x_api_key is None or not secrets.compare_digest(x_api_key, settings.api_key):
+        raise HTTPException(status_code=401, detail="Missing or invalid API key")
+```
+
+```python
+@app.post("/items", dependencies=[Depends(require_api_key)])
+@app.put("/items/{item_id}", dependencies=[Depends(require_api_key)])
+@app.delete("/items/{item_id}", dependencies=[Depends(require_api_key)])
+```
+
+`secrets.compare_digest` instead of `==` matters here for the same reason
+it matters anywhere credentials get compared: a naive `==` short-circuits
+on the first mismatched character, which makes the comparison's timing
+leak how many leading characters were right. It's a narrow attack against
+a toy API on a laptop, and a real one against anything exposed to the
+internet. `list_items` and `get_item` get no dependency at all -- reads
+stay open, same as `/api/v1/healthz` has to stay open regardless of which
+auth scheme gets picked, since Kubernetes' liveness and readiness probes
+call it directly with no mechanism for presenting credentials.
+
+The key itself follows the exact pattern `postgres-secret.yaml` set up in
+Chapter 8 -- a new `api-key-secret.yaml`, wired into `deployment.yaml`
+as one more `secretKeyRef`:
+
+```shell
+kubectl describe pod toy-api-5fd8ff4d68-c7vdn | grep -A 7 "Environment:"
+```
+
+```
+Environment:
+  POSTGRES_HOST:      <set to the key 'POSTGRES_HOST' of config map 'postgres-config'>  Optional: false
+  ...
+  API_KEY:            <set to the key 'API_KEY' in secret 'api-key-secret'>  Optional: false
+```
+
+Same masking, same mechanism, one more line. Now the same anonymous
+request:
+
+```shell
+curl -s -w "\nstatus: %{http_code}\n" -X DELETE \
+  "http://${MINIKUBE_IP}:${NODE_PORT}/api/v1/items/item2"
+```
+
+```json
+{"detail":"Missing or invalid API key"}
+status: 401
+```
+
+Reads still don't need anything:
+
+```shell
+curl -s "http://${MINIKUBE_IP}:${NODE_PORT}/api/v1/items"
+```
+
+```json
+[{"id":"item1","name":"First Item","value":100},{"id":"item2","name":"Second Item","value":200}]
+```
+
+And the correct key gets through:
+
+```shell
+curl -s -w "\nstatus: %{http_code}\n" -X DELETE \
+  "http://${MINIKUBE_IP}:${NODE_PORT}/api/v1/items/item2" \
+  -H "X-API-Key: demo-key-a1b2c3d4e5"
+```
+
+```json
+{"status":"deleted","id":"item2"}
+status: 200
+```
+
+That's the whole feature, and it's also close to the ceiling of what API
+keys are good for. There's one key, shared by every legitimate caller --
+`test-api.sh` uses the same one a real client would. Revoking access for
+one caller without affecting the others means rotating the key for
+everyone, because the key doesn't identify *who's* calling, only *that*
+they know the secret. `AUTH.md`'s JWT section is the fix for that -- a
+token that carries an identity and an expiry, not just a shared password
+-- and OAuth2/OIDC is the fix for not wanting to issue or verify tokens
+yourself at all. Both are real upgrades over what's here now, and neither
+was needed to demonstrate the actual point of this section: an
+unauthenticated write and an authenticated one are now provably different
+requests, not the same request either way.
+
+## The cluster side: RBAC, checked directly
+
+Cluster RBAC is a separate system, answering a separate question, and
+this repo's manifests never touch it -- no `Role`, no `RoleBinding`, no
+`ServiceAccount` of its own. Check what identity the `toy-api` pods
+actually run under:
+
+```shell
+kubectl get pods -l app=toy-api -o jsonpath='{.items[0].spec.serviceAccountName}'
+```
+
+```
+default
+```
+
+Every pod in the `default` namespace that doesn't specify a
+`serviceAccountName` gets this one, automatically, whether anyone thought
+about it or not. Ask Kubernetes directly what that identity is allowed to
+do against the API server -- not what `toy-api`'s own code permits, what
+the *cluster* permits this ServiceAccount to touch:
+
+```shell
+kubectl auth can-i list pods --as=system:serviceaccount:default:default
+kubectl auth can-i get secrets --as=system:serviceaccount:default:default
+kubectl auth can-i delete deployments --as=system:serviceaccount:default:default
+```
+
+```
+no
+no
+no
+```
+
+Three flat no's. The `default` ServiceAccount, absent any `Role` granting
+it something, can't list pods, can't read a Secret -- including
+`postgres-secret`, sitting right there in the same namespace -- can't
+delete a Deployment. Compare that to whatever identity `kubectl` itself
+is using, the one this whole book has been running commands as:
+
+```shell
+kubectl auth can-i --list
+```
+
+```
+Resources   Non-Resource URLs   Resource Names   Verbs
+*.*         []                  []               [*]
+```
+
+`*.*` and `[*]` -- every resource, every verb. That's minikube's own
+admin credential, configured into `~/.kube/config` when the cluster
+started, and it's a completely different identity from the one `toy-api`'s
+pods run under. One has unrestricted access to everything in the cluster.
+The other has none. Both are true at the same moment, about the same
+cluster, because `kubectl auth can-i` and `curl`-ing an endpoint on
+`toy-api` are checking two unrelated permission systems that happen to
+share the word "auth."
+
+## On AWS: the same ServiceAccount does more work
+
+This repo targets minikube because minikube is free and local, not
+because minikube is the destination -- the eventual home for something
+like `toy-api` is a real cluster, and EKS is AWS's version of that. The
+`default` ServiceAccount's job changes the moment `toy-api` makes that
+move, not because Kubernetes RBAC works any differently, but because AWS
+adds a second question on top of it: not just "what can this identity do
+to the Kubernetes API," but "what can this identity do to AWS itself." A
+pod that needs to read from S3, publish to SQS, or call any other AWS
+service needs AWS credentials, and handing every node's EC2 instance
+role broad permissions -- so that every pod scheduled on that node
+inherits them, whether it needs them or not -- was the original,
+blunt answer. Tools like `kube2iam` and `kiam` existed specifically to
+patch that blunt answer, intercepting each pod's request for credentials
+and handing back something narrower. AWS's own answer, **IRSA** (IAM
+Roles for Service Accounts), replaces that interception trick with
+something built into the platform.
+
+The mechanism is the same `ServiceAccount` object this chapter has
+already been checking with `kubectl auth can-i` -- IRSA just adds one
+annotation:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: toy-api
+  namespace: default
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/toy-api-role
+```
+
+That annotation is a pointer to an IAM role, and the IAM role's own trust
+policy is what makes the binding specific rather than a free-for-all: it
+names the cluster's OIDC provider as a trusted federated identity, and
+restricts the trust to one exact `system:serviceaccount:<namespace>:<name>`
+string -- this ServiceAccount, in this namespace, nothing broader. A
+mutating admission webhook, watching for pods that use an annotated
+ServiceAccount, injects a projected token and two environment variables
+(`AWS_ROLE_ARN`, `AWS_WEB_IDENTITY_TOKEN_FILE`) into the pod at creation
+time. The AWS SDK picks those up automatically and exchanges the token
+for short-lived AWS credentials scoped to exactly that IAM role -- the
+pod never sees a long-lived access key, and a pod using a *different*
+ServiceAccount gets none of it. Same shape as everything else in this
+chapter: an identity, a scope, a binding that has to be created on
+purpose or the default is nothing.
+
+AWS introduced a newer mechanism in late 2023, **EKS Pod Identity**, that
+does the same job with less setup -- no OIDC provider to register, a
+DaemonSet running on each node instead of a per-cluster trust-policy
+dance, and an IAM role's trust policy naming a fixed AWS service
+principal instead of a cluster-specific OIDC ARN, so the same role can be
+reused across clusters without editing it. It's not a deprecation of
+IRSA -- Pod Identity doesn't support Fargate, Windows nodes, or EKS
+Anywhere, so IRSA is still the only option there -- but it's the simpler
+default worth reaching for on a standard Linux-EC2 EKS cluster.
+
+Both of those answer "what can a pod do to AWS." The reverse question --
+who's allowed to `kubectl apply` against an EKS cluster at all, the same
+question `kubectl auth can-i --list` answered for minikube above -- is a
+separate mechanism again: an `aws-auth` ConfigMap mapping IAM
+users/roles to Kubernetes RBAC groups, or, since December 2023, EKS
+**access entries**, which do the same mapping through the EKS API instead
+of a ConfigMap anyone with `edit` on `kube-system` could otherwise patch.
+Three related but distinct systems, then, once AWS is in the picture --
+Kubernetes RBAC for what's allowed inside the cluster, IRSA or Pod
+Identity for what a pod is allowed to do to AWS, and access entries for
+who's allowed to reach the cluster's API at all -- and the pattern
+repeats: nothing is granted by default, every binding is a specific,
+auditable choice, and the `default` ServiceAccount having nothing at all
+is still, on AWS as much as on minikube, what "nobody asked for anything"
+correctly looks like.
+
+## Where each one actually belongs
+
+The practical rule falls out of what got demonstrated above rather than
+needing to be stated as a separate principle: application auth belongs
+inside the application, checked in `app.py`, because only the application
+knows what "delete an item" or "read this user's data" actually means.
+Cluster RBAC belongs to whatever is allowed to change the cluster's own
+state -- a CI pipeline's deploy credentials, a human running `kubectl`
+by hand, the ServiceAccount a controller uses to watch and reconcile
+other objects. `toy-api` itself has no legitimate reason to ever call the
+Kubernetes API, so the `default` ServiceAccount having zero permissions
+isn't a gap to close, it's the correct state by accident -- the app
+simply never asked for more, and nothing granted it any.
+
+The one place these two systems are supposed to meet, deliberately, is a
+controller or operator -- something Chapter 6 flagged as the gap a bare
+StatefulSet leaves open. A Postgres Operator, unlike `toy-api`, has a real
+reason to talk to the Kubernetes API: creating PVCs, updating StatefulSets,
+watching for pod failures. That's exactly the case where a `ServiceAccount`
+needs a real `Role` scoped to what the operator actually does -- read and
+write StatefulSets and PVCs in its own namespace, nothing about Secrets in
+other namespaces, nothing cluster-wide. Getting that scope right is most
+of what makes an Operator trustworthy to run: too little and it can't do
+its job, too much and a bug or a compromise in the operator's code becomes
+a cluster-wide problem instead of a contained one. `toy-api`'s `default`
+ServiceAccount, with nothing granted, is what "too little" looks like when
+nothing was ever asked for. A real operator sits somewhere in between,
+and getting that middle right is a RoleBinding written on purpose, not a
+default nobody thought about.

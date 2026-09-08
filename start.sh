@@ -20,6 +20,7 @@ echo ""
 echo "🧹 Cleaning up existing deployments..."
 kubectl delete -f deployment.yaml --ignore-not-found
 kubectl delete -f service.yaml --ignore-not-found
+kubectl delete -f api-key-secret.yaml --ignore-not-found
 kubectl delete -f postgres-statefulset.yaml --ignore-not-found
 kubectl delete -f postgres-service.yaml --ignore-not-found
 kubectl delete -f postgres-configmap.yaml --ignore-not-found
@@ -33,6 +34,7 @@ kubectl apply -f postgres-secret.yaml
 kubectl apply -f postgres-pvc.yaml
 kubectl apply -f postgres-statefulset.yaml
 kubectl apply -f postgres-service.yaml
+kubectl apply -f api-key-secret.yaml
 kubectl apply -f deployment.yaml
 kubectl apply -f service.yaml
 

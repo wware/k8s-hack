@@ -8,12 +8,14 @@ import asyncpg
 import json
 import logging
 import os
+import secrets
 import uuid
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from datetime import datetime
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from prometheus_client import Counter
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel
@@ -29,10 +31,25 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql://postgres:postgres@localhost:5432/toyapi"
     log_level: str = "INFO"
+    api_key: str | None = None
     model_config = SettingsConfigDict(env_prefix="")
 
 
 settings = Settings()
+
+
+async def require_api_key(x_api_key: Annotated[str | None, Header()] = None) -> None:
+    """Gate write endpoints behind a shared API key.
+
+    Reads and /healthz stay open -- Kubernetes probes call /healthz
+    directly and have no mechanism for presenting credentials.
+    """
+    if settings.api_key is None:
+        # No key configured (e.g. local dev without the Secret mounted):
+        # fail closed rather than silently accepting every write.
+        raise HTTPException(status_code=503, detail="API key not configured")
+    if x_api_key is None or not secrets.compare_digest(x_api_key, settings.api_key):
+        raise HTTPException(status_code=401, detail="Missing or invalid API key")
 
 
 # JSON Logging Setup
@@ -267,7 +284,7 @@ async def get_item(item_id: str) -> Item:
         return Item(id=row["id"], name=row["name"], value=row["value"])
 
 
-@app.post("/items")
+@app.post("/items", dependencies=[Depends(require_api_key)])
 async def create_item(item: Item) -> Item:
     """Create a new item."""
     async with db_pool.acquire() as conn:
@@ -290,7 +307,7 @@ async def create_item(item: Item) -> Item:
         return item
 
 
-@app.put("/items/{item_id}")
+@app.put("/items/{item_id}", dependencies=[Depends(require_api_key)])
 async def update_item(item_id: str, item: Item) -> Item:
     """Update an existing item."""
     if item.id != item_id:
@@ -317,7 +334,7 @@ async def update_item(item_id: str, item: Item) -> Item:
         return item
 
 
-@app.delete("/items/{item_id}")
+@app.delete("/items/{item_id}", dependencies=[Depends(require_api_key)])
 async def delete_item(item_id: str) -> dict[str, str]:
     """Delete an item."""
     async with db_pool.acquire() as conn:

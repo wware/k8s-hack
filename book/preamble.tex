@@ -1,0 +1,13 @@
+% Wrap long lines in fenced code blocks instead of letting them run off
+% the page -- pandoc's default Verbatim/Highlighting environments don't
+% wrap, and this book quotes real command output and long log lines.
+\usepackage{fvextra}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{
+  breaklines,breaksymbolleft={},
+  fontsize=\small,
+  commandchars=\\\{\}
+}
+\DefineVerbatimEnvironment{verbatim}{Verbatim}{
+  breaklines,breaksymbolleft={},
+  fontsize=\small
+}
