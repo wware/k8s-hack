@@ -2299,3 +2299,157 @@ is told to manage. It doesn't reconcile ArgoCD's own configuration
 against itself -- that boundary, and where responsibility for watching
 it actually sits, is worth remembering the next time something that's
 "supposed to be self-healing" turns out not to be.
+
+# Multi-Environment Deployment Without the Copy-Paste
+
+## Three environments, one template
+
+Everything so far in Part IV has been one Application watching one
+path in one repo. The `gitops-lab-envs` ApplicationSet sitting in the
+same cluster is a different shape entirely -- one generator, scanning a
+directory, producing as many Applications as it finds matching
+subdirectories:
+
+```yaml
+spec:
+  generators:
+    - git:
+        repoURL: http://172.22.0.3:3000/wware/gitops-lab.git
+        revision: main
+        directories:
+          - path: envs/*
+  template:
+    metadata:
+      name: gitops-lab-{{path.basename}}
+    spec:
+      destination:
+        namespace: '{{path.basename}}'
+      source:
+        path: '{{path}}'
+```
+
+`envs/*` matches `envs/dev`, `envs/staging`, `envs/prod` -- three
+directories in the repo, none of them mentioned by name anywhere in
+this file. Ask the cluster what actually exists because of it:
+
+```shell
+kubectl get applications -n argocd
+```
+
+```
+NAME                 SYNC STATUS   HEALTH STATUS
+gitops-lab-dev       Synced        Healthy
+gitops-lab-prod      Synced        Healthy
+gitops-lab-staging   Synced        Healthy
+```
+
+Three Applications, none of them hand-written. The generator found three
+directories and rendered the same template three times, substituting
+`{{path}}` and `{{path.basename}}` differently each time -- the same
+loop-over-a-list mental model from Chapter 13, except the loop variable
+comes from scanning a directory tree instead of a hardcoded list, and
+the loop body is a YAML template instead of a function call.
+
+## What actually differs between them
+
+The template is identical across all three; what's not identical is what
+each directory contains. `dev`'s and `prod`'s copies of
+`deployment.yaml` are the same shape -- same `kind`, same
+container, same selector -- and different in exactly the numbers that
+should differ:
+
+```yaml
+# envs/dev/deployment.yaml, abbreviated
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+          env:
+            - name: ENVIRONMENT
+              value: "dev"
+```
+
+```yaml
+# envs/prod/deployment.yaml, abbreviated
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+        - resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          env:
+            - name: ENVIRONMENT
+              value: "prod"
+```
+
+Prod runs three replicas at four times dev's resource requests. That
+gradient is real, running right now, and checkable directly rather than
+just asserted from the YAML:
+
+```shell
+kubectl get pods -n dev
+kubectl get pods -n staging
+kubectl get pods -n prod
+```
+
+```
+NAME                          READY   STATUS    RESTARTS   AGE
+gitops-lab-6dc89657bb-x45vc   1/1     Running   0          18d
+```
+
+```
+NAME                         READY   STATUS    RESTARTS   AGE
+gitops-lab-7c8b4d8db-s2224   1/1     Running   0          18d
+gitops-lab-7c8b4d8db-x6j4b   1/1     Running   0          18d
+```
+
+```
+NAME                         READY   STATUS    RESTARTS   AGE
+gitops-lab-b44b8ff99-cdjj7   1/1     Running   0          18d
+gitops-lab-b44b8ff99-mtmsp   1/1     Running   0          18d
+gitops-lab-b44b8ff99-txw9d   1/1     Running   0          18d
+```
+
+One pod, two pods, three pods -- `dev`, `staging`, `prod`, in that order,
+matching `replicas: 1` / `2` / `3` in each directory's own manifest.
+Three separate namespaces, three separate Applications, all traceable
+back to one `ApplicationSet` object and a directory listing.
+
+## Why hand-maintained per-environment YAML rots
+
+The alternative to this is the thing every team eventually does by
+hand: copy `deployment.yaml` into a `staging` folder, copy it again into
+`prod`, and tweak the numbers in each copy. That works, once. The
+problem shows up later, when something needs to change everywhere at
+once -- a new environment variable, an updated readiness probe path, a
+different image tag -- and now it needs to be edited in three files that
+have no enforced relationship to each other beyond having started as
+copies. Nothing stops `staging/deployment.yaml` from silently missing
+the same fix `prod/deployment.yaml` got, because nothing ties them
+together once the copy-paste happens. The drift Chapter 14 spent a whole
+chapter making visible for cluster-vs-git state is exactly the failure
+mode three unlinked YAML copies invite between themselves, except there's
+no ArgoCD watching for *that* kind of drift -- nothing flags
+`staging` and `prod` disagreeing about something they were never
+supposed to disagree about in the first place.
+
+The ApplicationSet's generator-plus-template split is the actual fix,
+not a cosmetic one: everything that's supposed to be identical across
+environments -- the `Deployment` kind, the container name, the
+`CreateNamespace=true` sync option -- lives in exactly one place, the
+template. Everything that's supposed to differ -- replica count,
+resource limits, which namespace it lands in -- lives in the one place
+that's allowed to vary, each environment's own directory. A bug in the
+shared shape gets fixed once, in the template, and every environment
+inherits the fix on its next sync. A bug in one environment's specific
+numbers stays contained to that environment's own file, because that
+file is the only place those numbers exist. Copy-paste YAML makes both
+kinds of change error-prone in the same way; splitting generator from
+template makes each kind of change exactly as easy as it should be, and
+no easier than it should be to accidentally miss.

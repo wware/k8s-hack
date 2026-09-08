@@ -22,6 +22,3 @@ Pulumi.*.yaml
 .env
 .env.*
 !.env.example
-
-# Book build output
-book/book.pdf
