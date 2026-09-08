@@ -2121,3 +2121,181 @@ temporary, local lie about it. That's the practical payoff of the
 inversion this chapter opened with: the cluster no longer trusts
 whoever's holding a terminal. It trusts a git remote, continuously,
 whether or not anyone's watching.
+
+# Drift Detection and Self-Healing at the Fleet Level
+
+## Two settings, two very different outcomes
+
+`selfHeal: true` was doing a lot of quiet work in the last chapter's
+demo -- the drift got corrected so fast that "cluster disagrees with
+git" and "cluster back in sync with git" were nearly the same moment.
+That's the right behavior for production, and it's also easy to mistake
+for the whole story. Flip `selfHeal` off and the same manual scale
+command produces something genuinely different: not a faster or slower
+correction, but no correction at all, until someone decides there should
+be one.
+
+```shell
+kubectl patch application k8s-hack -n argocd --type merge \
+  -p '{"spec":{"syncPolicy":{"automated":{"prune":false,"selfHeal":false}}}}'
+```
+
+```shell
+kubectl scale deployment/toy-api -n default --replicas=5
+```
+
+```shell
+kubectl get pods -n default -l app=toy-api
+```
+
+```
+NAME                       READY   STATUS    RESTARTS   AGE
+toy-api-8467757567-czvzk   1/1     Running   0          8s
+toy-api-8467757567-kglph   1/1     Running   0          5m17s
+toy-api-8467757567-kx8t6   1/1     Running   0          18d
+toy-api-8467757567-qjhtd   1/1     Running   0          8s
+toy-api-8467757567-wpsph   1/1     Running   0          18d
+```
+
+Five pods, and nothing takes them away. Compare that to Chapter 13's
+`selfHeal: true` demo, where two of five pods were already terminating
+before they'd finished starting. With `selfHeal` off, the same manual
+scale just... works, and keeps working, indefinitely, exactly as if
+ArgoCD weren't involved at all.
+
+## The diff is there, even when nothing acts on it
+
+That's the part worth sitting with -- "nothing corrects it" is not the
+same as "nothing notices it." Force a refresh and ask ArgoCD what it
+thinks:
+
+```shell
+kubectl get application k8s-hack -n argocd
+```
+
+```
+NAME       SYNC STATUS   HEALTH STATUS
+k8s-hack   OutOfSync     Healthy
+```
+
+Two separate judgments, and it's worth being precise about the
+difference, because conflating them is an easy mistake. `HEALTH STATUS:
+Healthy` is Kubernetes' opinion of `toy-api` right now: five pods, all
+of them `Running`, all of them passing their readiness probes -- nothing
+about that state looks unwell to a Deployment controller or to ArgoCD's
+own health checks. `SYNC STATUS: OutOfSync` is a completely different
+question: does the cluster's actual state match what git says it should
+be. The app is healthy *and* wrong at the same time, and both of those
+are true, permanently, until someone or something acts. Ask for detail
+and ArgoCD names the exact resource that disagrees:
+
+```shell
+kubectl get application k8s-hack -n argocd \
+  -o jsonpath='{.status.resources}' | python3 -m json.tool | grep -B3 OutOfSync
+```
+
+```
+"kind": "Deployment",
+"name": "toy-api",
+"status": "OutOfSync",
+```
+
+Nothing else in the app -- not the Service, not the ConfigMap, not
+Postgres -- shows up in that list, because nothing else changed. The
+diff is scoped exactly to what actually drifted, which is what makes it
+usable: a real incident produces a real, specific diff, not a vague "something's
+off" alert.
+
+## A permanent diff, not a one-time audit
+
+This is the distinction the chapter title is pointing at. A traditional
+audit is something that runs once, or on a schedule -- someone, or some
+script, compares production against what it's supposed to be, produces a
+report, and that report is stale the moment it's generated. `OutOfSync`
+isn't a report. It's a live property of the Application object, computed
+continuously, visible in the same `kubectl get application` command a
+minute from now, an hour from now, or next week, for exactly as long as
+the drift persists. Nobody has to remember to go check. The check is
+always already running.
+
+With `selfHeal: false`, closing the gap is a deliberate act -- the
+equivalent of clicking Sync in the ArgoCD UI, or, from the terminal,
+triggering the same operation directly:
+
+```shell
+kubectl patch application k8s-hack -n argocd --type merge -p '{
+  "operation": {"sync": {"revision": "HEAD", "prune": false}}
+}'
+```
+
+```shell
+kubectl get pods -n default -l app=toy-api
+```
+
+```
+NAME                       READY   STATUS    RESTARTS   AGE
+toy-api-8467757567-kglph   1/1     Running   0          6m1s
+toy-api-8467757567-kx8t6   1/1     Running   0          18d
+toy-api-8467757567-wpsph   1/1     Running   0          18d
+```
+
+Back to three, `SYNC STATUS` back to `Synced` -- but only because
+something explicitly said so. That's the honest tradeoff `selfHeal:
+false` is making: drift gets surfaced immediately and reliably, and
+reconciling it is a choice, not an automatic reflex. For a system where
+someone wants eyes on every correction before it happens -- a
+compliance requirement, a genuinely fragile piece of infrastructure --
+that choice is the point, not a limitation.
+
+Flip `selfHeal` back on and the same drift resolves itself, no `Sync`
+command needed:
+
+```shell
+kubectl patch application k8s-hack -n argocd --type merge \
+  -p '{"spec":{"syncPolicy":{"automated":{"prune":false,"selfHeal":true}}}}'
+kubectl scale deployment/toy-api -n default --replicas=1
+```
+
+```shell
+kubectl get pods -n default -l app=toy-api
+```
+
+```
+NAME                       READY   STATUS    RESTARTS   AGE
+toy-api-8467757567-kx8t6   1/1     Running   0          18d
+toy-api-8467757567-sd2r5   0/1     Running   0          5s
+toy-api-8467757567-z5bsj   0/1     Running   0          5s
+```
+
+Two replacement pods already coming up, seconds after a scale-down to
+one, with nobody touching `Sync` at all.
+
+## Even the control file can drift
+
+This chapter's own demo turned up a real instance of the thing it's
+about, unplanned. `argocd-k8s-hack.yaml` -- the file in this repo that
+git is supposed to treat as the source of truth for the Application
+itself -- says `selfHeal: false`. The live Application, the whole time
+this chapter's commands were running against it, actually had `selfHeal:
+true`. Someone flipped it live, at some point, the same way `kubectl
+scale` flips a replica count live, and never pushed the matching change
+back to the file. That's drift too -- not in what `toy-api` runs, but in
+the GitOps configuration that's supposed to be governing it, and it's
+exactly as invisible as any other drift until someone thinks to check.
+The fix is the same fix as everywhere else in this book: make the file
+say what's actually true.
+
+```yaml
+# argocd-k8s-hack.yaml
+    automated:
+      prune: false
+      selfHeal: true
+```
+
+There's a small irony worth naming plainly: the tool built to keep
+everything else honest against git had, itself, quietly stopped being
+honest against its own git-tracked spec. GitOps reconciles what ArgoCD
+is told to manage. It doesn't reconcile ArgoCD's own configuration
+against itself -- that boundary, and where responsibility for watching
+it actually sits, is worth remembering the next time something that's
+"supposed to be self-healing" turns out not to be.
