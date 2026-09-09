@@ -127,27 +127,32 @@ I'm interested in making this a book with reference to these repositories on Git
 
 ### Part V -- Beyond Kubernetes: Generalizing the Pattern *(gitops_reconciler)*
 
-19. **GitOps Without a Cluster**
+19. **GitOps Without a Cluster, Watched Live**
     - The insight: Kubernetes just happens to supply a free, live, self-diffing control plane
     - Every other target (Terraform, Pulumi, CloudFormation, Compose, a Raspberry Pi) needs the reconciliation loop built explicitly
+    - Hands-on: `watch_and_reconcile.sh` against the Compose demo -- edit `docker-compose.yml`, commit, watch the next tick pick it up, the same "see the loop actually run before reading why it's shaped this way" move Chapter 6 opened Part III with
     - Introducing the `BackEnd` ABC: `apply()`, `destroy()`, `get_outputs()` -- three methods, one shared shape
 
 20. **Design Decisions, and Why They Were Made That Way**
+    - ABC over `Protocol`, and not just for readability: `ManagedTarget`'s `backend: BackEnd` field gets a real `isinstance()` check from Pydantic, where a `Protocol` (even `@runtime_checkable`) only confirms method *names* exist, not their signatures -- demonstrated live, the same "misspell a field, find out before runtime" argument Chapter 10 made about Pulumi's typed classes over raw YAML
     - Why there's no `plan()`/dry-run method: idempotent `apply()` already pays the diff cost
     - Why "refresh" logic lives inside each backend, not the shared interface
-    - Why there's no human-approval gate on the interface itself (and where that gate *does* belong)
+    - Why there's no human-approval gate on the interface itself, and where that gate *does* belong (a per-backend constructor flag, e.g. `TerraformBackend(dry_run=True)`, not a new interface method) -- and how that's consistent with, not a reversal of, the no-dry-run argument two bullets up
     - Why pull-vs-push scheduling is a wrapper concern, and convergence is a backend concern -- keeping layers honest
+    - Which backends this book actually ran (Compose, Pi) versus which are sketched but untested (Terraform, Pulumi's subprocess implementation) versus an honest stub (`CloudFormationBackend`, whose own tests just assert it says "stub") -- said plainly, the same way Chapter 6 said outright that a bare StatefulSet's guarantees stop at identity and storage
 
 21. **Credentials and Blast Radius**
     - Why the reconciler should run on a separate control machine from what it manages
     - Short-lived STS/instance-role credentials over static keys
     - The exception that proves the rule: a Raspberry Pi managing itself, where there's no privilege boundary worth protecting
+    - Cross-reference to Chapter 12: "who can call the reconciler against this target" vs. "who can write to the git repo it watches" is the same two-questions-that-sound-like-one split as application auth vs. cluster RBAC, one layer up
 
 22. **Progressive Delivery Without New Abstractions**
     - Staging tracks `:latest`; production pins to a validated SHA
     - The promotion script: reading staging's last-applied SHA, rewriting prod's pin, committing
-    - Why staging and prod never talk to each other directly -- git remains the only shared state
-    - This is the same pattern as Chapter 14's drift detection, just with a human-gated promotion step inserted
+    - Why staging and prod never talk to each other directly -- git remains the only shared state, and the promotion script itself never touches either target, only one state file and one config file
+    - Two parallels, not one: the same pattern as Chapter 14's drift detection (a human-gated promotion step instead of `selfHeal`), and also Chapter 15's problem solved with the same tool (one shared provenance field instead of one template, so the pin doesn't rot out of sync with what's actually running)
+    - The honest gap: `last_recorded_sha` trusts that staging's last *recorded* success still reflects staging's actual *live* state right now -- if staging drifted or got hand-patched since that tick, promotion happily ships a SHA that no longer matches reality, and nothing here plays the role ArgoCD's `selfHeal` played in Chapter 14
 
 ### Part VI -- Putting It Together
 
