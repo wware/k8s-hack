@@ -2822,3 +2822,161 @@ up again at this much smaller scale: describe the desired state, let a
 controller close the gap, and the source of the number driving that
 description turns out to be one of the least important things about the
 whole system.
+
+# GitOps Without a Cluster, Watched Live
+
+## What Kubernetes was quietly supplying for free
+
+Every reconciliation loop in this book so far -- the Deployment
+controller in Chapter 5, ArgoCD in Chapter 13, KEDA's HPA in Chapter 16
+-- got to assume something none of them had to build: a live, running
+system that already knows how to answer "what's actually true right
+now," continuously, without being asked. That's etcd plus the API
+server, and it's not a small thing to get for free. Point a controller
+at a Terraform-managed cloud stack, a Pulumi program, a Docker Compose
+host, or a Raspberry Pi on someone's LAN, and there's no equivalent
+already running. Something has to poll git, decide whether the world
+matches it, and act -- from scratch, because the target has no
+self-diffing control plane sitting underneath it the way Kubernetes
+always did.
+
+`gitops_reconciler` is a small, real answer to that gap: one wrapper
+process, driven by a git repo, that can manage several unrelated targets
+on independent schedules, with the actual apply mechanism -- Terraform,
+Pulumi, Compose, a bare SSH session to a Pi -- decided per target. Rather
+than read about it, run it.
+
+## Watching the loop notice a change, live
+
+The demo stack is a small FastAPI app under Docker Compose. Start it the
+same way `DEMO.md` describes:
+
+```shell
+uv run python reconcile_example.py
+```
+
+```
+Starting reconciliation for example-app
+Compose file: .../example-app/docker-compose.yml
+example-app: CHANGED - stack updated successfully
+Reconciliation complete
+```
+
+`CHANGED`, the first time, because nothing was running yet. Run it again
+without touching anything:
+
+```shell
+uv run python reconcile_example.py
+```
+
+```
+example-app: NO_CHANGE - stack already up to date
+```
+
+No `docker compose up` this time -- the reconciler hashes the rendered
+compose config and compares it to the hash it saved after the last
+successful apply, and skips the actual work when nothing changed.
+Terraform and Pulumi get this kind of diff for free from their own state
+engines; Compose doesn't have one, so `ComposeBackend` fakes it with a
+hash comparison instead. Cheap, and honest about being a workaround
+rather than a real diff.
+
+Now start the watch loop, the actual centerpiece of this chapter:
+
+```shell
+./watch_and_reconcile.sh 8
+```
+
+It just calls `reconcile_example.py` every eight seconds, forever --
+`cron` or a systemd timer in production, a `while true` loop here.
+Leave it running, and in the repo's working tree, change the compose
+file's port mapping:
+
+```shell
+sed -i 's/9001:8080/9002:8080/' example-app/docker-compose.yml
+git add example-app/docker-compose.yml
+git commit -m "Change demo app port to 9002"
+```
+
+Nothing was pushed to a remote, and nothing was told to re-run early --
+the watch loop is already running, on its own eight-second clock, and
+the next tick finds the change on its own:
+
+```
+🔄 [2026-09-09 12:43:23] Running reconciliation...
+example-app: NO_CHANGE - stack already up to date
+
+🔄 [2026-09-09 12:43:31] Running reconciliation...
+example-app: CHANGED - stack updated successfully
+```
+
+One tick still `NO_CHANGE` -- the edit hadn't landed yet when that cycle
+ran -- and the very next one, eight seconds later, `CHANGED`. Confirm
+it's not just a log line:
+
+```shell
+curl -s -o /dev/null -w "9001: %{http_code}\n" http://localhost:9001/
+curl -s -o /dev/null -w "9002: %{http_code}\n" http://localhost:9002/
+```
+
+```
+9001: 000
+9002: 200
+```
+
+9001 refuses the connection outright -- nothing's listening there
+anymore. 9002 answers. Revert the edit, commit again, and the next tick
+puts it back exactly the same way, no special-cased "undo" logic
+anywhere in the reconciler -- reverting a git commit and applying a new
+one are the same operation as far as `apply()` is concerned, which is
+the same point Chapter 13 made about `git revert` being a real rollback
+mechanism rather than a separate feature to build.
+
+## A worthwhile honest gap, found by accident
+
+Running this demo cold, before making any deliberate change, actually
+turned up something worth knowing about rather than glossing over: an
+old `.last_applied_hash` file was still sitting in `example-app/` from
+an earlier session, and the very first reconciliation reported
+`NO_CHANGE` even though no containers were running at all. The hash
+comparison only checks "does the rendered config match what I last
+successfully applied" -- it has no way to notice "and is that
+still actually running." Delete the containers out from under a
+`ComposeBackend` by hand, without touching the compose file, and the
+hash still matches, so the reconciler has no reason to think anything
+needs fixing. That's a real, narrow gap in hash-based idempotency, not a
+bug exactly -- the hash was never designed to answer "is reality still
+what I last made it," only "did the desired state change since last
+time" -- and it's worth remembering the next time `NO_CHANGE` shows up
+somewhere unexpected.
+
+## The shared shape underneath all of it
+
+Every backend this reconciler supports -- Terraform, Pulumi,
+CloudFormation, Compose, plain SSH to a Pi -- implements the same three
+methods:
+
+```python
+class BackEnd(ABC):
+    @abstractmethod
+    def apply(self) -> Status: ...
+
+    @abstractmethod
+    def destroy(self) -> Status: ...
+
+    @abstractmethod
+    def get_outputs(self) -> dict[str, Any]: ...
+```
+
+`apply()` reconciles desired state and reports what happened.
+`destroy()` tears everything down. `get_outputs()` hands back whatever
+backend-specific data the caller might need -- a Terraform output, a
+Pulumi stack export, a container's IP. That's the entire contract. It's
+deliberately smaller than it might be -- no `plan()`, no dry-run,
+no built-in approval gate -- and Chapter 20 is going to spend real time
+on why each of those omissions is a choice rather than an oversight. For
+now, the shape itself is the point: whatever `apply()` was just watched
+doing to a Docker Compose stack over the last few pages is the exact
+same method a Terraform-backed or Pulumi-backed target would be running,
+on its own schedule, against its own git repo, with nothing about the
+wrapper loop needing to know or care which one it's talking to.
