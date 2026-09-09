@@ -3143,3 +3143,93 @@ is battle-tested or sketched. Knowing which is which, for any given
 target, is part of trusting the system -- not a footnote to leave out
 because it's less flattering than pretending everything's equally
 proven.
+
+# Credentials and Blast Radius
+
+## The reconciler's environment is the actual security boundary
+
+`TerraformBackend.apply()` shells out to `terraform apply -auto-approve`.
+`PulumiBackend.apply()` shells out to `pulumi up --refresh -y`. Neither
+one does anything with credentials -- no explicit AWS keys, no assumed
+role, nothing passed in and nothing read out. That's not an oversight to
+fix later. `subprocess.run`, called with no environment override, hands
+the child process the parent's entire environment, and that's the whole
+credential story for every cloud backend this reconciler has: whatever
+AWS access is ambient in the shell the wrapper process runs in is
+exactly the access `terraform` and `pulumi` get when the wrapper calls
+them. The reconciler doesn't scope, narrow, or manage that access at all.
+It inherits it, in full, every tick.
+
+That makes the question "where does this process run" the actual
+security boundary, not a detail beneath one. If the wrapper runs on the
+same machine it manages, and that machine gets compromised, the attacker
+doesn't just have the machine -- they have whatever credentials let the
+wrapper reprovision infrastructure from that machine, because those
+credentials were sitting in the environment the whole time, available to
+anything running there. Running the reconciler on a separate control
+machine turns that into a much narrower problem: compromising the target
+gets an attacker the target, not a standing set of credentials that can
+also touch everything else the wrapper manages.
+
+## Short-lived over static, for the same reason Chapter 12 gave
+
+The other half of limiting blast radius is bounding how long a leaked
+credential stays useful. A static, long-lived AWS access key that leaks
+is valid until someone notices and manually revokes it -- hours, days,
+sometimes longer. Short-lived STS credentials, refreshed automatically
+from an instance role or a federated identity, expire on their own,
+typically within an hour. A credential that leaks and expires forty
+minutes later is a smaller incident than one that stays live until a
+human catches it. Preferring STS-style credentials over static keys
+"wherever the provider supports it" isn't a preference for its own sake
+-- it's shrinking the same window `PulumiBackend`'s `--refresh` flag
+exists to keep honest, applied to the credential layer instead of the
+state layer: don't let something stay trusted longer than it has to.
+
+## The exception that proves the rule
+
+`PiBackend` breaks this pattern entirely, on purpose, and the code shows
+exactly why the pattern doesn't apply there. Look at how it decides
+whether to use SSH at all:
+
+```python
+def _ssh_prefix(self) -> list[str]:
+    return [] if self._cfg.host in ("", "local") else ["ssh", self._cfg.host]
+```
+
+No cloud API, no assumed role, no STS anywhere in this backend --
+`apply()` either runs the configured command directly, on the box it's
+already running on, or reaches one specific Pi over SSH. There's no
+meaningful privilege boundary between "the wrapper" and "the thing it
+manages" to protect in either case: a Raspberry Pi on a home LAN
+managing itself has no blast radius bigger than the Pi. Running the
+reconciler loop on the Pi it manages -- something that would be a real
+mistake for a Terraform-backed target holding AWS credentials -- is
+simply fine here, because there's nothing broader for a compromised Pi
+to reach that the reconciler's presence made newly reachable. The rule
+about separate control machines exists specifically to protect
+credentials broader than the target itself. Where there's no such
+credential, there's nothing the rule is protecting.
+
+## The same split as Chapter 12, one layer up
+
+This chapter's actual question -- who can make the reconciler act
+against a given target -- is the same shape Chapter 12 drew between
+application auth and cluster RBAC, just moved one level up the stack.
+There, the split was "who can call `toy-api`'s endpoints" versus "who
+can run `kubectl apply` against the cluster itself," two unrelated
+questions enforced by different code at different layers. Here it's
+"who can get code executed as the reconciler process" -- and therefore
+inherit whatever credentials sit in that process's environment -- versus
+"who can write to the git repo the reconciler watches," which is a
+completely separate access-control question, answered by git hosting
+permissions, not by anything in `gitops_reconciler` itself. A person
+with commit access to the watched repo can get arbitrary Terraform or
+Compose config applied on the next tick, without ever touching the
+machine the wrapper runs on. A person with shell access to the wrapper's
+control machine has the ambient cloud credentials directly, without
+needing to touch git at all. Neither access implies the other, and
+mixing them up here would be the same mistake Chapter 12 spent a whole
+chapter clearing up -- just with "git write access" standing in for
+"application auth," and "shell access to the control machine" standing
+in for "cluster RBAC."
