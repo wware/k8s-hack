@@ -2720,3 +2720,105 @@ Matching the substrate to the actual need, not to what's most familiar or
 most impressive on a resume, is the whole decision -- everything else in
 this chapter is just making the actual numbers visible enough to make
 that match honestly.
+
+# Side Quests
+
+## EKS emulation on a home LAN
+
+Chapter 17 put a real number on running EKS: $210-265 a month, whether
+or not anything's actually happening in the cluster. That's a real
+obstacle to practicing multi-node mechanics before there's a budget or a
+production reason to spend it -- and the obstacle is smaller than it
+looks, because the part of EKS that's actually EKS-specific is thinner
+than it seems.
+
+Deployments, Services, RBAC, ConfigMaps, StatefulSets -- everything this
+book has spent seventeen chapters on -- is upstream Kubernetes,
+byte-for-byte identical whether the control plane is a $73/month managed
+service or `kubeadm` running across a couple of spare machines on a home
+network. The part that's genuinely AWS-specific is the infrastructure
+integration layer underneath that API: the VPC CNI handing out real
+routable IPs, IRSA's OIDC trust dance from Chapter 12, the AWS Load
+Balancer Controller provisioning a real ALB. That layer doesn't transfer
+to a home LAN, and pretending it does would defeat the point of
+practicing.
+
+What does transfer, closely, with real stand-ins rather than fakes:
+Calico or Cilium for CNI -- both are officially supported alternatives on
+real EKS too, not just a local substitute. MetalLB for `type: LoadBalancer`
+Services, giving a real LAN IP pool behind the same Service spec that
+provisions an NLB on EKS -- this closes the single most common
+"my Service just sits `Pending` forever" confusion anyone hits moving off
+Compose. `local-path-provisioner` for exercising the PVC/StorageClass
+lifecycle from Chapter 6, even though there's no EBS underneath. None of
+this is pretend Kubernetes. It's the same control plane, running on
+hardware instead of a managed service, with the storage and networking
+layers swapped for honest local equivalents of the same abstractions.
+
+What genuinely doesn't transfer is worth naming rather than glossing
+over: IRSA needs real IAM, so there's no way to emulate the credential
+exchange itself locally, only the workload-side pattern -- annotating a
+ServiceAccount, structuring an app to pick up injected credentials --
+so it's not unfamiliar later. Karpenter and the Cluster Autoscaler can't
+be practiced without a cloud to scale into. KEDA, though, scales on
+metrics regardless of what's underneath, which makes Chapter 16's demo
+the genuinely runnable adjacent skill -- multi-node kubeadm plus KEDA
+covers most of what's operationally different about EKS, without the
+monthly bill, and the day there's a reason to move, the delta is
+narrow: swap the CNI config (or keep it, since Calico and Cilium both
+run on real EKS), swap MetalLB for the AWS Load Balancer Controller, add
+the IRSA annotations, point at ECR. Everything written above the
+infrastructure layer -- every manifest in this book -- doesn't change
+at all.
+
+## Queue-based scaling as a portable pattern
+
+Chapter 16 built one specific instance of a much more general shape:
+a `ScaledObject` watching a queue, translating depth into replica count.
+The RabbitMQ trigger this book actually ran:
+
+```yaml
+triggers:
+- type: rabbitmq
+  metadata:
+    host: amqp://guest:guest@rabbitmq.keda-demo.svc.cluster.local:5672
+    queueName: work-queue
+    mode: QueueLength
+    value: "5"
+```
+
+Put an SQS trigger next to it:
+
+```yaml
+triggers:
+- type: aws-sqs-queue
+  metadata:
+    queueURL: https://sqs.us-east-1.amazonaws.com/123456/my-queue
+    queueLength: "10"
+```
+
+Or Kafka:
+
+```yaml
+triggers:
+- type: kafka
+  metadata:
+    bootstrapServers: kafka.kafka.svc.cluster.local:9092
+    topic: events
+    lagThreshold: "100"
+```
+
+Same shape, every time: a `type`, an address for the queue, a threshold
+that maps to "how much backlog justifies one more worker." The
+`ScaledObject` around each trigger -- `scaleTargetRef`, `minReplicaCount`,
+`maxReplicaCount` -- doesn't change at all between them. Swapping
+RabbitMQ for SQS in a real system isn't a redesign; it's changing which
+fifteen lines inside `triggers:` describe the queue, because KEDA's whole
+job is translating "some external thing has a number that means backlog"
+into the one thing every `ScaledObject` actually does regardless of
+where that number came from. The portability isn't an accident of KEDA's
+API design. It's the same idea Chapter 5 opened this book with, showing
+up again at this much smaller scale: describe the desired state, let a
+controller close the gap, and the source of the number driving that
+description turns out to be one of the least important things about the
+whole system.
