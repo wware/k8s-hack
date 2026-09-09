@@ -3410,3 +3410,348 @@ immediately before trusting its recorded SHA, the same continuous
 re-checking that makes `selfHeal` trustworthy instead of just fast.
 Nothing in this reconciler does that automatically, and that's worth
 knowing rather than assuming away.
+
+# One Pattern, Three Substrates
+
+## The same three verbs, every time
+
+Twenty-two chapters, three genuinely different pieces of software --
+Docker Compose, Kubernetes plus ArgoCD, and a hand-rolled Python
+reconciler -- and every single one of them turned out to be the same
+loop, wearing different clothes:
+
+```
+loop forever:
+    desired = read the declared state
+    actual  = observe the real world
+    if desired != actual:
+        act to close the gap
+```
+
+Compose's version of this loop only runs once, on demand -- `docker
+compose up` reads the file, checks the running containers, and converges,
+then stops. Kubernetes' version runs continuously and lives inside the
+cluster, watching etcd instead of a file on disk, with ArgoCD adding one
+more layer of the identical loop on top, watching git instead of a
+person's `kubectl` history. The reconciler from Part V builds that same
+loop from nothing, for targets that never had a Kubernetes-style control
+plane sitting underneath them to begin with. Declare, observe, reconcile.
+The verbs never changed. What changed, chapter to chapter, was only ever
+where the loop lived, how often it ran, and what "observe" and "act"
+actually meant for the thing being managed.
+
+## What each substrate actually buys, side by side
+
+| | Docker Compose | Kubernetes + ArgoCD | `gitops_reconciler` |
+|---|---|---|---|
+| Where the loop runs | On demand, when you run it | Continuously, inside the cluster | Continuously, wherever the wrapper process runs |
+| What it observes | The current host's containers | Cluster state via the API server | Whatever `get_outputs()`/a hash comparison can see |
+| Multi-host scheduling | No -- Chapter 4's real ceiling | Yes -- the scheduler's whole job | No -- one target, one apply mechanism |
+| Self-healing | No, not automatically | Yes, standing order (Ch. 7) | Only if the backend's own tool provides it |
+| Drift detection | No | Yes, continuous and visible (Ch. 14) | Only as good as the last recorded tick (Ch. 22) |
+| Setup cost | Minutes | Hours, plus real ongoing cost (Ch. 9, 17) | An afternoon, per new backend |
+| What "idempotent" costs | Nothing native -- Compose just reapplies | Native, built into every controller | Depends on backend: free for cloud tools, faked with a hash for Compose/Pi (Ch. 20) |
+| Where it fits | One host, one team | Multiple hosts, fleet-scale operations | Anything with no built-in control plane at all |
+
+None of these rows is a verdict. Compose scoring "no" on multi-host
+scheduling isn't a defect -- Chapter 4 already made the case that this is
+exactly the right tradeoff for a workload that only ever needed one host.
+The table is a map of what each substrate is actually for, read the way
+Chapter 9 and Chapter 17 both insisted it be read: against a specific
+workload's specific needs, not as a ranking with Kubernetes at the top.
+
+## A checklist for a new project
+
+Pulled together from Chapter 9's signals and Chapter 17's framework,
+because they were always asking the same question at two different
+layers -- deployment substrate and autoscaling substrate -- with the same
+answer both times: match the tool to the need that's actually present,
+not the one that might show up eventually.
+
+- **Does this run on one host, for one team, right now?** If yes, and
+  none of the signals below are true yet, Compose (or the equivalent
+  single-box pattern from Chapter 17) is the right answer, not a
+  placeholder for something more serious.
+- **Has a specific, concrete trigger actually happened** -- one host
+  genuinely out of headroom, a deploy that has to happen without an
+  outage because people are actively using the thing, a second team
+  that needs to ship independently, a hardware failure that took
+  something down for real? Chapter 9's argument was that these are the
+  actual signals, not a vague sense that the project has gotten
+  "serious." Wait for one of them, not for a feeling.
+- **Is the fixed cost smaller than what it buys?** Kubernetes and a real
+  EKS cluster both have costs that don't scale down with idle time --
+  $73/month for a control plane whether or not anything's running in it.
+  That's fine once the workload justifies it, and a bad deal for
+  everything below that line.
+- **Does the target already have a control plane, or does one need to be
+  built?** Kubernetes supplies etcd and an API server for free. A
+  Terraform-managed cloud stack, a Compose host, a Raspberry Pi -- none
+  of them do, which is the entire reason Part V's reconciler exists.
+  Reaching for ArgoCD against a target with no Kubernetes underneath it
+  is reaching for the wrong half of the pattern; reaching for a
+  hand-rolled reconciler against something Kubernetes already manages is
+  rebuilding what's already there for free.
+- **What's the actual failure mode being protected against?** Chapter 22
+  named the sharpest version of this: `selfHeal` and `last_recorded_sha`
+  look like they're solving the same problem, but only one of them
+  continuously re-checks live reality instead of trusting a past
+  success. Know which guarantee a given substrate actually gives before
+  assuming it gives the stronger one.
+
+Answer these honestly for a real project, and the substrate mostly picks
+itself -- the same way it did, chapter by chapter, across every one of
+the twenty-two before this one.
+
+# What Still Isn't Covered
+
+## The honest list
+
+Chapter 2 set a principle early and asked the rest of this book to carry
+it: if it's not in git, it shouldn't be running. Twenty-three chapters
+later, that principle has been kept -- but it was kept for a
+deliberately narrow slice of what a real production system actually
+needs. Naming what's outside that slice, plainly, is more useful than
+letting the book's silence on a topic pass as "solved" or "unimportant."
+
+**Secrets management at scale.** `postgres-secret.yaml` and
+`api-key-secret.yaml` in this book both said the same thing in their own
+comments: fine for a learning exercise, base64 is not encryption, real
+deployments need Sealed Secrets or External Secrets Operator pulling
+from an actual vault. Chapter 8 and Chapter 12 both demonstrated the
+*shape* of a Secret -- masked in `kubectl describe`, separate from
+ConfigMaps -- and neither one built the hardened version. SOPS,
+encrypting secrets in git directly rather than keeping git free of them
+entirely, is the other common answer and wasn't touched at all.
+
+**A full observability stack.** Chapter 11 built real structured
+logging and proved, live, that `kubectl logs` loses a pod's history the
+moment the pod is gone -- and then stopped exactly at the point where
+Loki or the EFK stack would actually solve that. `app.py` exposes a
+`/metrics` endpoint via `prometheus_fastapi_instrumentator`, and Chapter
+10's Pulumi program deploys an actual Prometheus and Grafana pair for a
+different app entirely -- but nothing in this book wired the toy API's
+own metrics into a dashboard, set up an alert, or traced a request
+across more than one service. The gap Chapter 11 demonstrated is real
+and still open.
+
+**RBAC and network policy, past the basics.** Chapter 12 covered the
+distinction between application auth and cluster RBAC, and Chapter 21
+carried the same split one layer up into the reconciler -- but neither
+one built a real least-privilege Role for a production workload, and
+NetworkPolicy objects, restricting which pods can even talk to which
+other pods over the network, never came up at all. A cluster with no
+NetworkPolicies is one where every pod can reach every other pod by
+default, regardless of how carefully RBAC is scoped.
+
+**Image scanning and supply-chain attestation.** Chapter 2 argued that
+bad actors have industrialized -- automated scanning, supply-chain
+attacks -- as part of the case for version-controlled infrastructure in
+the first place. This book never closed the loop on the container image
+side of that same argument: nothing here scans `k8s-toy-api:local` for
+known vulnerabilities before it runs, and nothing verifies the image
+running in the cluster is actually the image that was built from
+reviewed source, the way SBOM generation and image signing (cosign,
+Sigstore) are meant to guarantee.
+
+## Where to actually go next
+
+None of these are exotic. Each one is a natural continuation of a
+chapter that's already been read, not a new subject dropped in cold --
+External Secrets Operator extends Chapter 8's ConfigMap/Secret split;
+Loki extends Chapter 11's structured logging; a real least-privilege
+Role extends Chapter 12's ServiceAccount work; image scanning extends
+Chapter 2's own argument about industrialized threats back to where it
+started. Chapter 2's principle still holds as the filter for evaluating
+any of them: if a secret, a metric, a permission, or an image's
+provenance isn't recorded somewhere auditable, it doesn't really exist
+as far as the system's security posture is concerned, no matter how
+carefully everything upstream of it was built. This book got the
+pattern right -- declare, observe, reconcile -- across three substrates.
+Getting the pattern right and closing every gap in what it's applied to
+were always two different jobs, and only the first one was this book's.
+
+```{=latex}
+\appendix
+```
+
+# Command Reference
+
+Every command below was actually run somewhere in this book. The
+chapter number is where to find the fuller transcript and explanation.
+
+## Docker / Docker Compose
+
+| Command | What it does | Chapter |
+|---|---|---|
+| `docker build -t <tag> .` | Build an image from a Dockerfile | 3, 6 |
+| `docker history <image>` | Show an image's layer stack and sizes | 3 |
+| `docker compose up -d --build` | Build and start all services in the background | 4, 19 |
+| `docker compose ps -a` | List all containers for a project, including stopped | 4, 19, 22 |
+| `docker compose -f <file> -p <project> ps` | List containers for a specific compose file/project pair | 19, 22 |
+| `docker compose up -d --scale <svc>=N` | Try to run N replicas of one service | 4 |
+| `docker compose down` | Stop and remove a project's containers and network | 4, 19 |
+
+## kubectl: pods, deployments, and workloads
+
+| Command | What it does | Chapter |
+|---|---|---|
+| `kubectl get pods -l app=<label>` | List pods matching a label selector | 6, 7, 12, 13, 16 |
+| `kubectl get pods -w` | Watch pod status changes live | 7 |
+| `kubectl delete pod <name>` | Delete a pod; its controller replaces it | 6, 7, 8, 13, 14, 22 |
+| `kubectl scale deployment/<name> --replicas=N` | Change a Deployment's desired replica count | 7, 13, 14 |
+| `kubectl scale statefulset/<name> --replicas=N` | Same, for a StatefulSet | 7 |
+| `kubectl exec <pod> -- <cmd>` | Run a command inside a running container | 7, 12, 16, 22 |
+| `kubectl wait --for=condition=ready pod -l <label>` | Block until matching pods report ready | 6, 7, 8 |
+| `kubectl rollout restart deployment/<name>` | Trigger a rolling restart | 8 |
+| `kubectl rollout status deployment/<name>` | Watch a rollout until it completes or fails | 8 |
+| `kubectl logs <pod>` / `kubectl logs -l <label>` | Fetch a container's stdout/stderr | 8, 11 |
+| `kubectl describe pod <name>` | Full pod detail, including env var provenance | 8, 12 |
+
+## kubectl: config, secrets, RBAC
+
+| Command | What it does | Chapter |
+|---|---|---|
+| `kubectl get configmap <name> -o yaml` | Show a ConfigMap's current contents | 8 |
+| `kubectl patch configmap <name> --type merge -p '<json>'` | Edit a ConfigMap in place | 8 |
+| `kubectl get secret <name> -o yaml` | Show a Secret (base64-encoded, not decrypted) | 8 |
+| `kubectl auth can-i <verb> <resource> [--as=<identity>]` | Check whether an identity can perform an action | 12 |
+| `kubectl auth can-i --list` | List everything the current identity can do | 12 |
+
+## kubectl: ArgoCD, KEDA, and cluster inspection
+
+| Command | What it does | Chapter |
+|---|---|---|
+| `kubectl get application <name> -n argocd` | Check an ArgoCD Application's sync/health status | 13, 14 |
+| `kubectl get applications -n argocd` | List all ArgoCD Applications | 13, 15 |
+| `kubectl patch application <name> -n argocd --type merge -p '<json>'` | Force a refresh, change syncPolicy, or trigger a sync | 13, 14 |
+| `kubectl get hpa` | List HorizontalPodAutoscalers, including KEDA-managed ones | 16 |
+| `kubectl get deployment <name>` | Check a Deployment's ready/available replica counts | 16 |
+| `kubectl get pods -n kube-system` | See the control plane's own pods | 5 |
+
+## Git
+
+| Command | What it does | Chapter |
+|---|---|---|
+| `git commit -am "<message>"` | Commit all tracked changes with a message | 13, 22 |
+| `git push <remote> <branch>` | Push commits to a remote | 13, 22 |
+
+## Pulumi
+
+| Command | What it does | Chapter |
+|---|---|---|
+| `pulumi preview` | Show what `pulumi up` would change, without applying | 10 |
+| `pulumi up` | Apply the program's desired state | 10 |
+| `pulumi destroy` | Tear down everything the stack manages | 10 |
+| `pulumi stack output <name>` | Print one exported output value | 10 |
+
+## gitops_reconciler
+
+| Command | What it does | Chapter |
+|---|---|---|
+| `uv run python reconcile_example.py` | Run one reconciliation tick against the demo Compose stack | 19 |
+| `./watch_and_reconcile.sh [interval]` | Run ticks on a loop, polling git for changes | 19 |
+| `python -m gitops_reconciler.example --target <name>` | Run one real tick (with git sync) against a named target | 22 |
+| `./promote.py [--dry-run]` | Promote staging's last-applied SHA to production's pin | 22 |
+
+# Glossary
+
+**ApplicationSet** -- an ArgoCD object that generates multiple `Application`
+objects from one template and a generator (e.g., a directory listing).
+Chapter 15.
+
+**BackEnd (ABC)** -- the abstract base class every `gitops_reconciler`
+backend implements: `apply()`, `destroy()`, `get_outputs()`. Chosen over
+a `Protocol` because Pydantic gives it a real `isinstance()` check.
+Chapters 19-20.
+
+**Control loop** -- the pattern underlying every reconciliation system in
+this book: read desired state, observe actual state, act to close the
+gap, repeat forever. Chapter 5 and onward.
+
+**ConfigMap** -- a Kubernetes object holding non-secret configuration,
+injected into pods as environment variables or mounted files. Chapter 8.
+
+**Desired state** -- what a system is declared to look like, as opposed
+to what it currently looks like (actual state). The gap between the two
+is what every controller in this book exists to close.
+
+**Drift** -- when actual state no longer matches desired state, usually
+because something changed it directly rather than through the declared
+source of truth. Chapters 1, 14, 22.
+
+**GitOps** -- managing infrastructure by treating a git repository as the
+source of truth and running a controller that continuously reconciles
+real state to match it. Chapters 13-22.
+
+**HPA (HorizontalPodAutoscaler)** -- the Kubernetes object that scales a
+Deployment's replica count based on a metric. KEDA creates and drives a
+real HPA rather than replacing it. Chapter 16.
+
+**Idempotent** -- an operation that produces the same result whether run
+once or many times. `apply()` is supposed to be idempotent for every
+backend in `gitops_reconciler`; Compose and Pi fake it with a hash
+comparison since they have no native diff. Chapter 20.
+
+**IRSA (IAM Roles for Service Accounts)** -- the AWS mechanism binding a
+Kubernetes ServiceAccount to an IAM role via OIDC federation, so pods get
+scoped AWS credentials instead of inheriting the node's. Chapter 12.
+
+**KEDA (Kubernetes Event-Driven Autoscaling)** -- scales workloads based
+on external metrics (queue depth, etc.) rather than CPU/memory alone, by
+feeding a custom metric to a standard HPA. Chapter 16.
+
+**Operator** -- a controller, following the same watch-diff-act pattern
+as everything built into Kubernetes, that encodes domain-specific
+operational knowledge (e.g., how to run Postgres) on top of primitives
+like StatefulSet. Chapters 6, 9, 12.
+
+**Provenance (in this book's reconciler)** -- the git SHA recorded
+after a successful `apply()` call. The mechanism that makes Chapter
+22's promotion pattern possible without any new abstractions.
+
+**Reconciliation** -- the act of comparing desired and actual state and
+acting to close any gap. The verb behind every noun in this glossary.
+
+**RBAC (Role-Based Access Control)** -- Kubernetes' system for
+controlling which identities can perform which actions against the API
+server, via Roles and RoleBindings (or ClusterRole/ClusterRoleBinding).
+Distinct from application-level auth. Chapter 12.
+
+**Secret** -- a Kubernetes object like ConfigMap, but for sensitive
+values -- base64-encoded (not encrypted) by default, masked in `kubectl
+describe` output. Chapter 8.
+
+**selfHeal** -- an ArgoCD Application syncPolicy setting that
+automatically reverts manual changes to match git, rather than just
+flagging them as `OutOfSync`. Chapter 14.
+
+**ServiceAccount** -- the identity a pod runs as when it talks to the
+Kubernetes API. Defaults to `default` with no permissions unless a Role
+is explicitly bound to it. Chapters 12, 21.
+
+**StatefulSet** -- a Kubernetes controller for workloads needing stable
+identity and stable storage across rescheduling. Guarantees stop there --
+no built-in replication, failover, or backups. Chapter 6.
+
+# Repository Map
+
+This book draws on three repositories, each anchoring a different part.
+
+| Repo | Anchors | What it actually is |
+|---|---|---|
+| `k8s-hack` | Parts I-IV (Chapters 1-18) | This book's own source, plus the toy API and Kubernetes manifests every hands-on chapter through Chapter 18 walks through directly |
+| `gitops-lab` | Part IV (Chapters 13-18) | A working kind + ArgoCD + Gitea setup: the `k8s-hack` Application, the `gitops-lab-envs` ApplicationSet, and the KEDA/RabbitMQ demo, all live and referenced with real command output |
+| `gitops_reconciler` | Part V (Chapters 19-22) | The backend-agnostic reconciler itself -- `BackEnd`, `ManagedTarget`, `tick()` -- plus the Compose demo and the staging/prod promotion example |
+
+**Suggested reading order**, if not reading start to finish: Parts I-III
+(Chapters 1-12) stand alone as a Kubernetes fundamentals course and don't
+require either of the other two repos. Part IV (13-18) needs `gitops-lab`
+running to reproduce the transcripts, but its concepts build directly on
+Part III and shouldn't be read out of order relative to it. Part V (19-22)
+needs `gitops_reconciler` and stands mostly independent of Parts III-IV
+conceptually -- someone who only cares about GitOps outside Kubernetes
+could reasonably start at Chapter 19 after reading Chapters 1-2 and 5 for
+the control-loop framing, though the cross-references back to Chapters 12
+and 14 will land better having read those first. Part VI (23-24) and the
+appendices assume everything before them.
