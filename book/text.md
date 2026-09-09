@@ -2980,3 +2980,166 @@ doing to a Docker Compose stack over the last few pages is the exact
 same method a Terraform-backed or Pulumi-backed target would be running,
 on its own schedule, against its own git repo, with nothing about the
 wrapper loop needing to know or care which one it's talking to.
+
+# Design Decisions, and Why They Were Made That Way
+
+## Why an ABC instead of a Protocol, checked live
+
+`BackEnd` could have been written as a `typing.Protocol` instead of an
+`abc.ABC` -- structural typing instead of nominal, matching by shape
+instead of by declared inheritance. Python's own docs would call that
+the more idiomatic choice for something this small. It's not what
+`gitops_reconciler` does, and the reason is more concrete than a style
+preference: `ManagedTarget` is a Pydantic model with a `backend: BackEnd`
+field, and Pydantic validates that field differently depending on which
+one it is.
+
+With the real `BackEnd` ABC, hand it something that merely looks like a
+backend -- same three method names, no inheritance:
+
+```python
+class LooksLikeABackend:
+    def apply(self): pass
+    def destroy(self): pass
+    def get_outputs(self): return {}
+
+ManagedTarget(name="test", backend=LooksLikeABackend(), repo=Path("/tmp"))
+```
+
+```
+ValidationError: 1 validation error for ManagedTarget
+backend
+  Input should be an instance of BackEnd [type=is_instance_of, ...]
+```
+
+Rejected, immediately, at construction time -- before a single `apply()`
+ever gets called against production. Swap the ABC for a
+`@runtime_checkable Protocol` and hand it something with the same method
+*names* but a genuinely wrong signature:
+
+```python
+class NotReallyABackend:
+    def apply(self, target, force=True):
+        return "oops, wrong signature entirely"
+    def destroy(self): pass
+    def get_outputs(self): return {}
+```
+
+```python
+>>> isinstance(NotReallyABackend(), BackEndProtocol)
+True
+>>> Model(backend=NotReallyABackend())
+Model(backend=<...NotReallyABackend object...>)
+```
+
+Accepted. `runtime_checkable` only checks that methods with those names
+exist on the object -- not their signatures, not their return types, not
+whether calling them does anything sane. A `Protocol` is happy to shake
+hands with something that would blow up the moment the wrapper actually
+called `apply()` for real. This is the same argument Chapter 10 made
+about Pulumi's typed classes catching a misspelled field before
+`pulumi up` ever runs, one layer further down: not "which syntax reads
+nicer," but "which one of these two choices catches the mistake before
+it reaches production instead of during it."
+
+## Why there's no `plan()` or dry-run method
+
+The obvious instinct, coming from Terraform or Pulumi, is to split
+"check for drift" from "apply the fix" -- `plan()` then `apply()`, the
+way `terraform plan` and `terraform apply` are two separate commands.
+`gitops_reconciler` considered this and rejected it, for a reason that's
+almost tautological once it's stated plainly: all three cloud backends
+are idempotent by construction, which means a full diff against reality
+is *inherent* to what `apply()` already has to do before it decides
+whether to change anything. A no-op tick costs exactly the same diff
+work whether the wrapper calls `plan()` and skips `apply()`, or just
+calls `apply()` and lets it discover there's nothing to do. Splitting
+one method into two doesn't save any work. It adds a second call site
+and makes the wrapper responsible for a decision the backend was always
+going to make correctly on its own.
+
+The same reasoning decides where "refresh" logic lives. Terraform and
+Pulumi both maintain external state that can go stale relative to
+reality -- that's specifically what `--refresh` corrects. CloudFormation
+has no such artifact; AWS itself is the live state, queried fresh on
+every call, so "refresh" has nothing to reconcile against for that
+backend. Putting a `refresh()` method on the shared interface would be
+meaningful for two backends and a permanent no-op for the third -- a
+leaky abstraction, forcing every implementer to answer a question one of
+them structurally can't. Keeping refresh-or-not entirely inside each
+backend's own `apply()` means the interface never asks a question it
+already knows some answer will be "not applicable."
+
+## Why there's no built-in approval gate -- and where it actually goes
+
+A fully autonomous reconciler, no human in the loop by default, is a
+deliberate choice. Staging is where a backend's behavior gets vetted
+before it's trusted to run unattended against anything real; logs after
+the fact are enough for post-hoc review once that trust is earned. If a
+specific backend genuinely needs a review gate, the answer isn't a new
+method on `BackEnd` -- it's a constructor argument on that one backend:
+`TerraformBackend(dry_run=True)`. Most backends and most ticks don't
+need a gate at all, and an interface shouldn't carry a capability that
+only one implementer ever uses.
+
+That's worth stating plainly because it resolves something that could
+otherwise look like the project quietly reversing itself: the README
+lists "dry-run mode" under recommended future enhancements, right next
+to replacing the Pulumi backend's subprocess calls with the real
+Automation API. Read alongside the constructor-flag reasoning above,
+that's not a contradiction -- it's the same position, followed through.
+A per-backend `dry_run` flag was always where a review gate belonged.
+Adding one later is building the thing the design already pointed at,
+not walking it back.
+
+## Why pull-vs-push and convergence stay on separate sides
+
+Two more boundaries, and both come from the same rule: each decision
+belongs to exactly one layer. *When* to run, *how often*, and *what*
+triggers a run -- a cron tick, a webhook, a person invoking the script by
+hand -- are questions a backend has no business answering; it doesn't
+know and shouldn't need to. *How* to detect and achieve convergence is
+the opposite -- a question the wrapper has no business answering, because
+that's what `apply()` exists for. Git sync lives in the wrapper for the
+same reason: pulling the repo, checking out the right commit, deciding
+whether anything changed since last sync, is identical work regardless
+of which backend gets called next, so it happens once, centrally,
+instead of once per backend implementation.
+
+Locking follows the same discipline at a smaller scale. A single lock
+around the whole wrapper process would mean one slow Terraform apply
+blocks an unrelated Pi tick that shares no state with it at all. Scoping
+the lock to `(backend_name, target)` instead means independent targets
+tick independently, and `fcntl.flock` self-releases if the process dies,
+so there's no stale-lock cleanup logic anywhere to get wrong.
+
+## What actually ran, and what's sketched
+
+Worth being as plain about this as Chapter 6 was about a bare
+StatefulSet's guarantees stopping at identity and storage: not every
+backend in this reconciler has been run against something real in this
+book. `ComposeBackend` is the one Chapter 19 actually exercised, live --
+real containers, a real port change, a real revert. `PiBackend` is
+genuinely implemented, not a stub, but nothing in this book ran it
+against an actual Raspberry Pi; the same is true of `TerraformBackend`
+and `PulumiBackend`, both real subprocess-driven implementations that
+shell out to real CLIs, untested here for lack of cloud infrastructure
+to point them at. `CloudFormationBackend` is a different case entirely
+-- an honest, admitted stub:
+
+```python
+def apply(self) -> Status:
+    return Status(result=ApplyResult.NO_CHANGE, message="stub: implement via boto3")
+```
+
+Its own test doesn't pretend otherwise -- it asserts the word "stub"
+shows up in the message. Eighty-two tests pass across this codebase, 85%
+statement coverage, and that's a real, healthy number -- but it's a
+number about whether the code behaves the way its own tests say it
+should, not a claim that every backend has been proven against a real
+Terraform state file or a real CloudFormation stack. The three methods
+on `BackEnd` are the same shape whether the implementation behind them
+is battle-tested or sketched. Knowing which is which, for any given
+target, is part of trusting the system -- not a footnote to leave out
+because it's less flattering than pretending everything's equally
+proven.
