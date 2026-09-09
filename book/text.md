@@ -3233,3 +3233,180 @@ mixing them up here would be the same mistake Chapter 12 spent a whole
 chapter clearing up -- just with "git write access" standing in for
 "application auth," and "shell access to the control machine" standing
 in for "cluster RBAC."
+
+# Progressive Delivery Without New Abstractions
+
+## Two targets, one repo, no new machinery
+
+Staging tracks `:latest`. Production pins to a specific, already-validated
+tag. Both watch the same git repo -- `example-app/` -- and apply
+different compose files inside it:
+
+```yaml
+# docker-compose.staging.yml
+services:
+  demo-app:
+    image: gitops-demo-app:latest
+```
+
+```yaml
+# docker-compose.prod.yml
+services:
+  demo-app:
+    image: gitops-demo-app:v1.0.0
+```
+
+That's the entire trick, and it's worth stating plainly: nothing about
+`ManagedTarget` or `tick()` changed to support this. Both targets are
+ordinary `ComposeBackend` instances, each with its own lock file and
+state file, each reconciling on its own schedule against its own
+`docker-compose.*.yml`. Progressive delivery here isn't a feature the
+reconciler had to grow. It's two instances of a pattern that already
+existed, pointed at two files that happen to differ in one line.
+
+## Watching a real promotion happen
+
+Start staging, applying `latest` for real:
+
+```shell
+python -m gitops_reconciler.example --target demo-app-staging
+```
+
+```
+demo-app-staging: changed
+```
+
+Check what got recorded:
+
+```shell
+cat /tmp/gitops-agent/state/demo-app-staging.json
+```
+
+```json
+{"sha": "908c552f5be93bf2cb459c5a86b8766c48dfb280", "result": "changed", "message": ""}
+```
+
+That's `record_last_sha()` from Chapter 20's wrapper -- the same
+provenance mechanism that exists purely for audit-trail reasons in the
+base design -- turning out to be the load-bearing piece of a
+completely different, more sophisticated pattern without anyone having
+to add anything for it. `promote.py`, copied from `promote.example.py`,
+reads exactly that file:
+
+```shell
+./promote.py --dry-run
+```
+
+```
+Staging last applied: 908c552
+Production current pin: v1.0.0
+[DRY RUN] Would update .../docker-compose.prod.yml:
+    image: gitops-demo-app:908c552
+```
+
+Run it for real, commit the result, and prod's next tick picks it up the
+same way every other change in this book has propagated -- through git,
+not through the promotion script touching prod directly:
+
+```shell
+./promote.py
+git add example-app/docker-compose.prod.yml
+git commit -m "Promote demo-app to staging SHA 908c552"
+git push
+```
+
+```shell
+python -m gitops_reconciler.example --target demo-app-prod
+```
+
+```
+demo-app-prod: changed
+```
+
+```shell
+docker compose -f example-app/docker-compose.prod.yml -p gitops-demo-prod ps
+```
+
+```
+NAME                          IMAGE                     STATUS
+gitops-demo-prod-demo-app-1   gitops-demo-app:908c552   Up
+```
+
+Prod is now running the exact SHA staging validated. `promote.py` never
+touched prod, and prod's reconciler never talked to staging's -- the
+promotion script read one state file and wrote one compose file, and the
+rest was the ordinary reconciliation loop this whole book has been
+watching, doing what it always does.
+
+## Two parallels, not one
+
+This is Chapter 14's drift detection with a human-gated promotion step
+inserted where `selfHeal` would otherwise fire automatically -- staging
+auto-applies on every change the way a `selfHeal: true` Application
+does, and prod stays pinned until a human, not a controller, decides
+it's time to move the pin forward. But it's also Chapter 15's problem,
+solved with the same tool aimed differently. Chapter 15 closed by naming
+the failure mode of hand-copied per-environment YAML plainly: nothing
+ties `staging/deployment.yaml` and `prod/deployment.yaml` together once
+they're copied, so they drift apart from *each other* over time with
+nothing watching for it. `record_last_sha` and `last_recorded_sha` are
+that missing tie -- one shared provenance field connecting two
+independently-reconciled targets, so the pin can't silently drift out of
+sync with what staging actually validated. Chapter 15 solved its version
+with one generator producing many environments from one template. This
+solves it with one recorded fact two environments both read from --
+different shape, same underlying complaint: nothing should be allowed to
+drift apart from what it's supposed to track without someone noticing.
+
+## The honest gap, demonstrated
+
+`last_recorded_sha` answers "what SHA did staging last successfully
+apply." It does not answer "is that still what's actually running on
+staging right now," and the difference is easy to miss until it's
+demonstrated directly. Stop staging's container by hand, without
+touching git and without running another tick:
+
+```shell
+docker compose -f example-app/docker-compose.staging.yml \
+  -p gitops-demo-staging stop
+```
+
+The state file doesn't change -- nothing ran to change it:
+
+```shell
+cat /tmp/gitops-agent/state/demo-app-staging.json
+```
+
+```json
+{"sha": "908c552f5be93bf2cb459c5a86b8766c48dfb280", "result": "changed", "message": ""}
+```
+
+Ask `promote.py` what it thinks, with staging's container actually
+stopped:
+
+```shell
+./promote.py --dry-run
+```
+
+```
+Staging last applied: 908c552
+Production current pin: 908c552
+Production is already at staging's SHA, no promotion needed
+```
+
+Perfectly reasonable, given what the script can see -- and quietly
+wrong. Staging isn't running at all right now, and `promote.py` has no
+way to know that, because it never checks staging's live state, only
+the state file recorded the last time a tick actually succeeded there.
+ArgoCD's `selfHeal` closed a version of this exact gap in Chapter 14 --
+continuously re-checking live cluster state against git, not trusting a
+stale record of what *used* to be true. Nothing here plays that role.
+If staging drifted, crashed, or got hand-patched sometime after its last
+successful tick, promotion would happily ship whatever SHA that old tick
+recorded, on the reasonable-sounding but false assumption that a past
+success is still a present one. The fix, if it mattered enough to build,
+would be exactly what Chapter 14 already demonstrated: re-tick staging
+immediately before trusting its recorded SHA, the same continuous
+re-checking that makes `selfHeal` trustworthy instead of just fast.
+Nothing in this reconciler does that automatically, and that's worth
+knowing rather than assuming away.
