@@ -2608,3 +2608,115 @@ Bursty, queue-driven work is common enough in real systems -- background
 jobs, webhook processing, batch pipelines -- that "pay for actual work,
 not idle capacity" isn't a niche optimization. It's what the workload
 actually looks like, once the autoscaler is watching the right signal.
+
+# The Cost/Complexity Decision
+
+## The same problem, three price points
+
+Chapter 16's KEDA demo runs on a `kind` cluster on a laptop, and that's
+worth being honest about: this book has been demonstrating queue-driven
+autoscaling for free. A queue-driven worker fleet that scales 0→N on
+demand is a real, common pattern -- and there are at least three
+substrates that can run it, at three very different costs and three very
+different operational burdens. None of them is the correct answer by
+default. Each is correct for a specific situation, and the mistake this
+chapter is trying to head off is picking one because it's the most
+familiar or the most impressive, rather than because it matches what's
+actually being built.
+
+## Option A: single-box autoscaling
+
+One machine, no cluster. `docker compose up --scale worker=N`, or a
+small hand-rolled watcher polling a queue and adjusting replica counts
+itself, or Nomad in single-node mode if the watcher needs to be more
+than a weekend project. All three do the real thing -- scale workers up
+when a queue has backlog, down when it doesn't -- without any of the
+machinery Part III and this Part have spent a dozen chapters building.
+
+The honest cost comparison, cribbed from `gitops-lab`'s own decision
+matrix:
+
+| | Single box | Kubernetes (EKS) |
+|---|---|---|
+| Monthly cost | $15-30 (one `t3.medium`) | $210-265 (control plane + nodes) |
+| Setup time | ~30 minutes | 2-3 hours |
+| Max scale | ~20-30 containers, CPU/memory bound | hundreds of nodes |
+| High availability | None -- one box, one failure domain | Multi-node, self-healing |
+
+For a workload that fits comfortably inside "20-30 containers on one
+machine" and doesn't need to survive that one machine dying, single-box
+autoscaling isn't a compromise. It's the option that costs an order of
+magnitude less and takes a fraction of the setup time, for a workload
+that was never going to use Kubernetes' actual selling points -- Chapter
+9's argument again, this time applied specifically to autoscaling rather
+than to deployment in general.
+
+## Option B: AWS Auto Scaling Groups
+
+Skip Kubernetes, keep AWS. An SQS queue depth feeds a `TargetTrackingScaling`
+policy on an EC2 Auto Scaling Group -- structurally the same idea as
+KEDA's `ScaledObject`, a target metric value per instance instead of per
+pod, and the ASG launches or terminates EC2 instances to hold that target,
+the same way KEDA's HPA launches or terminates pods:
+
+```hcl
+target_tracking_configuration {
+  customized_metric_specification {
+    metric_name = "ApproximateNumberOfMessagesVisible"
+    namespace   = "AWS/SQS"
+  }
+  target_value = 10.0
+}
+```
+
+Spot instances knock the compute cost down roughly 70% for workloads that
+can tolerate interruption -- batch rendering, data transformation,
+anything stateless and resumable. What this option doesn't have is
+KEDA's responsiveness: ASG scaling operates on a 1-3 minute cycle,
+launching real EC2 instances with real boot times, not scheduling
+already-warm pods onto already-running nodes. That's a real, structural
+tradeoff, not a rough edge to be optimized away -- an EC2 instance takes
+minutes to become useful in a way a pod doesn't, no matter how the scaling
+policy is tuned. Fine for a render farm where a job queued for two extra
+minutes doesn't matter. Wrong for anything answering requests in
+real time.
+
+## Option C: real EKS
+
+Everything Chapter 16 demonstrated, minus the "on a free laptop cluster"
+part. A real EKS control plane is a flat $73 a month before a single
+worker node exists -- `gitops-lab`'s own cost breakdown puts a
+minimally-provisioned cluster with two `t3.medium` nodes, a load
+balancer, and a NAT gateway at $210-265 a month, running whether or not
+anything is actually processing work. That number is the honest price of
+everything Part III and this Part have been walking through for free:
+self-healing, multi-node scheduling, the whole reconciliation-loop
+apparatus. None of it is free to run for real, and the fixed costs --
+control plane, NAT gateway -- don't scale down with idle time the way
+KEDA scales pods down to zero. A cluster costs the same at 2am with
+nothing in the queue as it does at peak load.
+
+That price is worth paying past a specific threshold: multiple teams
+sharing infrastructure, workloads that genuinely need multi-node
+scheduling and not just multiple containers, a scale where "hundreds of
+nodes" from the table above stops being hypothetical. Below that
+threshold, EKS is the bulldozer for the garden hole `REAL_EKS_DEPLOY.md`
+warns about -- it works, and it costs $200 a month more than a solution
+that would have worked just as well.
+
+## A decision framework, not a default answer
+
+None of these three options is the right one in general, and that's the
+actual point. The question worth asking, every time, is the same one
+Chapter 9 asked about Kubernetes overall: what does this workload
+actually need, checked against what each option actually costs -- not in
+dollars alone, but in setup time, operational attention, and how much of
+that cost is fixed versus scales with use. A single box that costs $20 a
+month and takes thirty minutes to set up is the right answer for far more
+projects than reach for it. An EKS cluster billing $250 a month whether
+or not it's doing anything is the right answer only past the point where
+that fixed cost is smaller than the cost of not having what it buys.
+Matching the substrate to the actual need, not to what's most familiar or
+most impressive on a resume, is the whole decision -- everything else in
+this chapter is just making the actual numbers visible enough to make
+that match honestly.
