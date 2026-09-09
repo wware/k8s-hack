@@ -2453,3 +2453,158 @@ file is the only place those numbers exist. Copy-paste YAML makes both
 kinds of change error-prone in the same way; splitting generator from
 template makes each kind of change exactly as easy as it should be, and
 no easier than it should be to accidentally miss.
+
+# Autoscaling on Real Signal: KEDA
+
+## What CPU can't see
+
+The Horizontal Pod Autoscaler's default signal is CPU utilization, and
+for a lot of workloads that's a reasonable proxy for "busy." It's a bad
+proxy for anything that spends most of its time waiting -- a worker
+blocked on I/O, holding a connection open, sitting idle between
+messages, can be doing genuinely important work while its CPU graph
+looks flat. A queue-driven worker is close to the worst case for this:
+it might use almost no CPU while messages pile up behind it, because the
+bottleneck was never the CPU, it was throughput per worker. Scaling on
+CPU in that situation means the autoscaler stays quiet exactly when
+there's a real backlog building, because the metric it's watching was
+never measuring the thing that actually mattered.
+
+KEDA -- Kubernetes Event-Driven Autoscaling -- doesn't replace the HPA to
+fix this. It feeds it something better. Every KEDA `ScaledObject` creates
+a real, ordinary `HorizontalPodAutoscaler` behind the scenes:
+
+```shell
+kubectl get hpa -n keda-demo
+```
+
+```
+NAME                           REFERENCE                  TARGETS      MINPODS   MAXPODS   REPLICAS
+keda-hpa-queue-worker-scaler   Deployment/queue-worker    0/5 (avg)    1         10        4
+```
+
+Same object Kubernetes has always had. What's different is where the
+`0/5` comes from -- not `cpu.usage`, but an `External` metric KEDA
+publishes itself:
+
+```shell
+kubectl get hpa keda-hpa-queue-worker-scaler -n keda-demo -o yaml
+```
+
+```yaml
+metrics:
+- external:
+    metric:
+      name: s0-rabbitmq-work-queue
+    target:
+      averageValue: "5"
+      type: AverageValue
+  type: External
+```
+
+`keda-metrics-apiserver`, one of the three pods KEDA installs, is what
+makes `s0-rabbitmq-work-queue` a metric the HPA can read at all --
+it polls RabbitMQ's queue depth and exposes it through the same metrics
+API the HPA already knows how to consume. KEDA's actual contribution
+isn't a new autoscaler. It's a new, pluggable source of truth for the
+one Kubernetes already has.
+
+## Watching it scale from zero, for real
+
+`keda-demo/worker.yaml` starts the `queue-worker` Deployment at
+`replicas: 0` on purpose -- there's nothing to consume when the queue is
+empty, so nothing should be running:
+
+```shell
+kubectl get pods -n keda-demo -l app=queue-worker
+```
+
+```
+No resources found in keda-demo namespace.
+```
+
+Send twenty messages -- `keda-demo/send.sh` publishes them onto
+`work-queue` -- and the `ScaledObject`'s trigger, `value: "5"`, does the
+arithmetic: twenty messages at five per worker is four workers.
+
+```shell
+bash keda-demo/send.sh
+```
+
+```shell
+kubectl get deployment queue-worker -n keda-demo
+```
+
+```
+NAME           READY   UP-TO-DATE   AVAILABLE   AGE
+queue-worker   4/4     4            4           17d
+```
+
+Four, not a guess -- exactly what the trigger's own math predicts, and
+checkable against the worker logs actually processing distinct tasks in
+parallel:
+
+```
+[pod/queue-worker-...-csv2b] [WORKER] Processing task: task-0
+[pod/queue-worker-...-cszw4] [WORKER] Processing task: task-3
+[pod/queue-worker-...-wbxtn] [WORKER] Processing task: task-2
+[pod/queue-worker-...-wjsk9] [WORKER] Processing task: task-1
+```
+
+Four workers, four different tasks in flight at once, each one an
+independent pod KEDA created because the queue said there was enough
+backlog to justify it -- not because a human ran `kubectl scale`, and
+not because a CPU graph crossed a threshold that happened to correlate
+with load.
+
+## Scaling back to zero, and paying for the gap honestly
+
+The workers finish, the queue empties, and `cooldownPeriod: 60` in the
+`ScaledObject` means KEDA waits a full minute of confirmed-empty before
+it trusts that the burst is really over -- worth having, since scaling
+to zero and immediately back up on the next message would cost more in
+pod-startup latency than it saves in idle compute. After that minute:
+
+```shell
+kubectl get pods -n keda-demo -l app=queue-worker
+```
+
+```
+NAME                           READY   STATUS        RESTARTS   AGE
+queue-worker-f576b4497-csv2b   1/1     Terminating   0          92s
+queue-worker-f576b4497-cszw4   1/1     Terminating   0          89s
+queue-worker-f576b4497-wbxtn   1/1     Terminating   0          89s
+queue-worker-f576b4497-wjsk9   1/1     Terminating   0          89s
+```
+
+And once they're gone:
+
+```shell
+kubectl get hpa -n keda-demo
+```
+
+```
+NAME                           REFERENCE                  TARGETS               REPLICAS
+keda-hpa-queue-worker-scaler   Deployment/queue-worker    <unknown>/5 (avg)     0
+```
+
+`<unknown>` instead of `0/5` is worth noticing rather than glossing
+over -- with no pods running, there's no current value to average, and
+the HPA says so plainly instead of reporting a fake zero. That's a small
+honest detail in a system built entirely around honest signals: KEDA
+doesn't pretend to know something it doesn't, the same way it doesn't
+pretend CPU is measuring something it isn't.
+
+Zero pods means zero cost for exactly as long as there's nothing to do,
+which is the actual payoff this chapter's title is pointing at. A
+CPU-based autoscaler with `minReplicas: 1` -- the sensible-sounding
+default, since scaling from zero on CPU alone means nothing is running
+to generate the CPU signal that would trigger scaling up -- pays for at
+least one idle worker permanently, waiting for load that might not
+arrive for hours. A queue has no such chicken-and-egg problem: message
+count is visible whether or not any worker exists to consume it yet, so
+scaling from zero is not just possible but the natural steady state.
+Bursty, queue-driven work is common enough in real systems -- background
+jobs, webhook processing, batch pipelines -- that "pay for actual work,
+not idle capacity" isn't a niche optimization. It's what the workload
+actually looks like, once the autoscaler is watching the right signal.
