@@ -2888,9 +2888,19 @@ Now start the watch loop, the actual centerpiece of this chapter:
 ```
 
 It just calls `reconcile_example.py` every eight seconds, forever --
-`cron` or a systemd timer in production, a `while true` loop here.
-Leave it running, and in the repo's working tree, change the compose
-file's port mapping:
+`cron` or a systemd timer in production, a `while true` loop here. Worth
+being precise about what `reconcile_example.py` actually watches before
+going further: it calls `tick_without_git_sync()`, not the wrapper's
+real `tick()`, and its own docstring says why -- "In production, this
+would be: `sync_git(target.repo)`." This demo script deliberately reads
+`docker-compose.yml` straight off the working tree, on every call,
+rather than pulling from a remote first. What's about to get
+demonstrated is the reconciler noticing a file change and reconciling to
+it -- real, and the same `apply()` call either way -- not yet the full
+git-sync behavior Chapter 22's `demo-app-staging`/`demo-app-prod` targets
+use later, which really does `git fetch` and `git reset --hard
+origin/main` before every tick. Leave the watch loop running, and in the
+repo's working tree, change the compose file's port mapping:
 
 ```shell
 sed -i 's/9001:8080/9002:8080/' example-app/docker-compose.yml
@@ -2898,9 +2908,12 @@ git add example-app/docker-compose.yml
 git commit -m "Change demo app port to 9002"
 ```
 
-Nothing was pushed to a remote, and nothing was told to re-run early --
-the watch loop is already running, on its own eight-second clock, and
-the next tick finds the change on its own:
+The `git commit` here is realistic workflow, not load-bearing for this
+particular script -- `tick_without_git_sync()` would have noticed the
+`sed` alone, before the commit ever happened, because it only reads the
+file on disk. Nothing was pushed to a remote, and nothing was told to
+re-run early -- the watch loop is already running, on its own
+eight-second clock, and the next tick finds the change on its own:
 
 ```
 🔄 [2026-09-09 12:43:23] Running reconciliation...
@@ -3154,11 +3167,32 @@ one does anything with credentials -- no explicit AWS keys, no assumed
 role, nothing passed in and nothing read out. That's not an oversight to
 fix later. `subprocess.run`, called with no environment override, hands
 the child process the parent's entire environment, and that's the whole
-credential story for every cloud backend this reconciler has: whatever
-AWS access is ambient in the shell the wrapper process runs in is
-exactly the access `terraform` and `pulumi` get when the wrapper calls
-them. The reconciler doesn't scope, narrow, or manage that access at all.
-It inherits it, in full, every tick.
+credential story for every cloud backend this reconciler has. Don't take
+that on faith -- set a fake credential in the shell and watch it cross
+into a child process through the same `_run()` helper every backend
+uses:
+
+```shell
+AWS_ACCESS_KEY_ID=DEMO_KEY_NOT_REAL uv run python3 -c "
+from gitops_reconciler.backends import _run
+result = _run(['env'])
+for line in result.stdout.splitlines():
+    if 'AWS_ACCESS_KEY_ID' in line:
+        print('found in child process env:', line)
+"
+```
+
+```
+found in child process env: AWS_ACCESS_KEY_ID=DEMO_KEY_NOT_REAL
+```
+
+`_run()` never touched that variable. It didn't have to. Whatever AWS
+access is ambient in the shell the wrapper process runs in is exactly
+the access `terraform` and `pulumi` get when the wrapper calls them --
+demonstrated here with a fake key standing in for a real one, and true
+of anything else sitting in that environment, real credentials included.
+The reconciler doesn't scope, narrow, or manage that access at all. It
+inherits it, in full, every tick.
 
 That makes the question "where does this process run" the actual
 security boundary, not a detail beneath one. If the wrapper runs on the
