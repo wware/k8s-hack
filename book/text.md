@@ -2751,6 +2751,20 @@ Balancer Controller provisioning a real ALB. That layer doesn't transfer
 to a home LAN, and pretending it does would defeat the point of
 practicing.
 
+**Proxmox as an honest middle ground.** Running kubeadm across multiple
+physical machines is the most direct emulation, but Proxmox VE on a
+single box gives multi-node cluster mechanics without needing separate
+hardware. Three or four VMs -- one control plane, two or three workers
+-- running kubeadm produces real multi-node scheduling, real network
+partitions if a VM goes down, real distributed etcd. Each VM is an
+actual separate Linux instance with its own kernel and network stack,
+the same as an EC2 instance, just sharing one hypervisor instead of
+occupying separate machines. The jump from Proxmox to real EKS is
+narrower than the jump from kind's container-based "nodes," because the
+latter never actually gave you separate machines with separate IPs and
+real inter-node network hops. Proxmox does, without the monthly bill or
+the need for a closet full of old desktops.
+
 What does transfer, closely, with real stand-ins rather than fakes:
 Calico or Cilium for CNI -- both are officially supported alternatives on
 real EKS too, not just a local substitute. MetalLB for `type: LoadBalancer`
