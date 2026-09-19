@@ -16,8 +16,11 @@ I'm interested in making this a book with reference to these repositories on Git
    - The old world: SSH in, hand-edit a config, restart a service, hope you remember what you did
    - Snowflake servers and the "it works on my machine (in production)" problem
    - Configuration drift: why two "identical" servers never stay identical
+   - When the scale problem makes everything worse: cloud platforms and automated failure handling
+   - Single source of truth as the missing piece: git as the canonical description
    - The rise of automation: Puppet/Chef/Ansible as the first wave of "describe, don't do"
    - Brief history: physical servers → VMs → containers → orchestrated containers
+   - **Repository Map**: how `k8s-hack`, `gitops-lab`, and `gitops_reconciler` relate, with suggested reading order
 
 2. **The Security Case for Systematized Infrastructure**
    - Why ad-hoc ops was always risky, and why it's *more* risky now
@@ -122,7 +125,7 @@ I'm interested in making this a book with reference to these repositories on Git
     - A decision framework, not a default answer: matching infrastructure to actual need (echoes Chapter 9)
 
 18. **Side Quests**
-    - EKS emulation on a home LAN (kubeadm + MetalLB): learning multi-node mechanics without AWS bills
+    - EKS emulation on a home LAN: Proxmox as honest middle ground between kind and real hardware, plus kubeadm + MetalLB for learning multi-node mechanics without AWS bills
     - Queue-based scaling as a portable pattern (SQS/Kafka/Redis -- same idea everywhere)
 
 ### Part V -- Beyond Kubernetes: Generalizing the Pattern *(gitops_reconciler)*
@@ -169,9 +172,9 @@ I'm interested in making this a book with reference to these repositories on Git
 
 ### Appendices
 
-- **A. Command Reference** -- `docker`, `docker compose`, `kubectl`, `pulumi`, `argocd` cheat sheets
-- **B. Glossary** -- reconciliation loop, desired state, drift, StatefulSet, ApplicationSet, etc.
-- **C. Repository Map** -- how `k8s-hack`, `gitops-lab`, and `gitops_reconciler` relate, with a suggested reading order per chapter
+- **A. Command Reference** -- `docker`, `docker compose`, `kubectl`, `pulumi`, `argocd`, `git`, and `gitops_reconciler` command cheat sheets organized by chapter
+- **B. Glossary** -- 25 entries covering core K8s objects (Deployment, Service, StatefulSet, ConfigMap, Secret, PVC, namespace), GitOps concepts (reconciliation, drift, selfHeal, ApplicationSet), and foundational terms (control loop, desired state, idempotent, operator). Definitions only, no page numbers (index provides those)
+- **C. Index** -- Auto-generated page references for all glossary terms plus additional indexed concepts throughout the book
 
 ## Trajectory for the book
 
