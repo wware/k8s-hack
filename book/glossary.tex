@@ -21,6 +21,11 @@
     description={A Kubernetes object holding non-secret configuration, injected into pods as environment variables or mounted files}
 }
 
+\newglossaryentry{deployment}{
+    name=Deployment,
+    description={A Kubernetes controller for stateless workloads that manages a ReplicaSet and handles rolling updates. Unlike StatefulSets, Deployments treat all replicas as interchangeable}
+}
+
 \newglossaryentry{desiredstate}{
     name=desired state,
     description={What a system is declared to look like, as opposed to what it currently looks like (actual state). The gap between the two is what every controller in this book exists to close}
@@ -56,9 +61,29 @@
     description={Scales workloads based on external metrics (queue depth, etc.) rather than CPU/memory alone, by feeding a custom metric to a standard HPA}
 }
 
+\newglossaryentry{minikube}{
+    name=minikube,
+    description={A tool that runs a single-node Kubernetes cluster locally, primarily for development and learning. Similar tools include kind (Kubernetes in Docker) and k3s}
+}
+
+\newglossaryentry{namespace}{
+    name=namespace,
+    description={A Kubernetes resource that provides isolation boundaries within a cluster. Different namespaces can have separate RBAC policies, resource quotas, and network policies}
+}
+
+\newglossaryentry{oci}{
+    name=OCI (Open Container Initiative),
+    description={The industry standard for container image formats and runtimes. Ensures containers built by Docker can run with Podman or other OCI-compliant tools, and vice versa}
+}
+
 \newglossaryentry{operator}{
     name=operator,
     description={A controller, following the same watch-diff-act pattern as everything built into Kubernetes, that encodes domain-specific operational knowledge (e.g., how to run Postgres) on top of primitives like StatefulSet}
+}
+
+\newglossaryentry{pvc}{
+    name=PVC (PersistentVolumeClaim),
+    description={A request for storage in Kubernetes. The cluster provisions a PersistentVolume to satisfy the claim, decoupling what storage a pod needs from how that storage is actually provided}
 }
 
 \newglossaryentry{provenance}{
@@ -84,6 +109,11 @@
 \newglossaryentry{selfheal}{
     name=selfHeal,
     description={An ArgoCD Application syncPolicy setting that automatically reverts manual changes to match git, rather than just flagging them as \texttt{OutOfSync}}
+}
+
+\newglossaryentry{service}{
+    name=Service,
+    description={A Kubernetes object that provides stable networking for a set of pods. Maps a fixed ClusterIP or external endpoint to dynamically-scheduled pods matched by label selectors}
 }
 
 \newglossaryentry{serviceaccount}{
