@@ -3274,7 +3274,16 @@ in for "cluster RBAC."
 
 Staging tracks `:latest`. Production pins to a specific, already-validated
 tag. Both watch the same git repo -- `example-app/` -- and apply
-different compose files inside it:
+different compose files inside it. Worth stating this as plainly as
+Chapter 13 stated its own inversion: staging and production reconcilers
+never talk to each other. No network reachability between them, no shared
+API, no service discovery. The only artifact both environments ever touch
+is the git repo, and the promotion script itself never calls into either
+target directly -- it reads one state file and writes one config file.
+This is Chapter 13's "credentials for git, not credentials for the
+cluster" decoupled one level further: ArgoCD's reconciler still needs
+network access to the cluster it manages, whereas these reconcilers don't
+even need to know the other environment exists.
 
 ```yaml
 # docker-compose.staging.yml
