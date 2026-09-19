@@ -4,20 +4,32 @@
 
 ### SSH in, hand-edit, restart, hope
 
-The old workflow doesn't need much reconstruction because most people who'd
-pick up this book have lived some version of it: `ssh` into the box, `vim`
-the config file, restart the service, watch the logs scroll by for a
-minute to confirm nothing's on fire, log out. It works. It's also the
-entire deployment process, in the sense that nothing about it exists
+The old workflow doesn't need much reconstruction because most people
+who'd pick up this book have lived some version of it: `ssh` into the
+box, `vim` the config file, restart the service, watch the logs scroll by
+for a minute to confirm nothing's on fire, log out. It works. It's also
+the entire deployment process, in the sense that nothing about it exists
 anywhere except in that terminal session and, if you're lucky, in
 whatever you remember about it later.
 
-That's the part worth sitting with, not the SSH command itself. The
-change you just made -- what config value moved, why, what it was before
--- lives in exactly one place: your memory of doing it, maybe backed by a
-comment you left in the file, if you left one. Six months later, "why is
-this set to 30 instead of the default of 10" has one honest answer: ask
-whoever did it, if they still work there, if they remember.
+The change you just made -- what config value moved, why, what it was
+before -- lives in exactly one place: your memory of doing it, maybe
+backed by a comment you left in the file, if you left one. Six months
+later, "why is this set to 30 instead of the default of 10" has one
+honest answer: ask whoever did it, if they still work there, if they
+remember.
+
+What this workflow doesn't yet mention are the idiosyncrasies of a server
+that's become a poorly documented unicorn. A line of a configuration file
+somewhere in the `/etc` filesystem may be critically important to system
+performance. You edited it six months ago and scribbled a note-to-self on
+the back of an envelope. The server is now a collection of minimally
+documented hacks that have piled up over the past three years. Change the
+version of a particular Perl library and the system fails for reasons
+unknown. Bring a set of SSH tunnels up in the wrong order and the system
+fails, again for reasons unknown. The list of banana peels seems endless.
+You promise yourself that when the current crunch ends, you'll sit down
+and document everything completely, but that day never comes.
 
 ### Snowflakes, and the gap between "works" and "works reliably"
 
@@ -43,22 +55,75 @@ into agreement, so unless someone is deliberately auditing for drift\index{drift
 and auditing for drift by hand doesn't scale past a small number of
 servers -- they just keep diverging.
 
+### When the scale problem makes everything worse
+
+This was manageable, barely, when one person maintained one server or a small
+cluster of servers. The web's been widely available since the early 1990s --
+static HTML\index{HTML}, then databases\index{database} and dynamic content,
+then CSS\index{CSS} and JavaScript\index{JavaScript} making things pretty, then
+AJAX\index{AJAX} making them interactive. Most of that evolution happened on
+the front end, visible to users. On the back end, progress was less obvious but
+just as real: single servers grew into small clusters, then into data centers,
+then into cloud platforms spanning multiple regions.
+
+AWS\index{AWS}, Azure\index{Azure}, and GCP \index{GCP} didn't emerge to make
+deployment easier. They emerged to meet the scaling needs of companies too
+large to run on one rack. Where a single server or a small rack might go months
+or years without a significant hardware failure, a cloud platform built of
+thousands or millions of servers must handle such failures many times per day.
+Given the number of machines and the size of the building, the mechanism for
+handling failures must be fully automated. Human technicians could never keep
+up with that churn in real time. Machines must be taken offline and flagged for
+whenever somebody can get to them, and other machines must be reassigned to
+take their place.
+
+This is the environment in which Kubernetes came into existence. A big
+part of what it does is run an application across multiple servers, under
+conditions where any machine may fail at any time -- the scale that made
+the old SSH-and-hope workflow collapse under its own weight.
+
+### Single source of truth\index{single source of truth} as the missing piece
+
+The fundamental problem the old workflow had, even before scale broke it
+entirely, was that there was no authoritative record of what the system
+was supposed to look like. The actual configuration lived in `/etc` on
+the server, modified by hand, with its history stored in someone's
+memory. When something broke, the question "what changed" had no reliable
+answer. When a second server needed to be configured the same way, the
+process was "try to remember everything you did on the first one."
+
+The fix, in retrospect, is obvious: describe what the system should look
+like in a set of files stored in a git repository. Application servers,
+load balancers, databases, networking, scaling criteria -- all of it
+written down, version-controlled, reviewable. The deployment becomes the
+act of making reality match that description. When something breaks, "what
+changed" has a commit hash for an answer. When a second environment needs
+to exist, it gets the same description applied to different infrastructure.
+
+That's the premise Kubernetes and every other modern deployment system is built
+on: a single source of truth that describes the desired state\index{desired
+state}, and machinery that reconciles actual state to match it. The rest of
+this book is, in a sense, unpacking what that reconciliation machinery actually
+does and why it's shaped the way it is. But the idea itself -- that there
+should be one canonical description of what's supposed to be running, and that
+the system should work to keep reality aligned with it -- is the load-bearing
+insight underneath everything else.
+
 ### Describe, don't do
 
-Puppet, Chef, and Ansible were the first widely-adopted answer to this,
-and the shift they represent is worth naming precisely, because it's the
-same shift Kubernetes makes later, just at a smaller scope. The old
-workflow is a sequence of commands: SSH in, run this, run that, check if
-it worked. A Puppet manifest or an Ansible playbook is a description of
-what the machine should look like -- this package installed, this file
-containing this content, this service running -- and the tool's job is to
-look at the machine, compare it to the description, and make only the
-changes needed to close the gap. Run the same playbook twice and the
-second run should do nothing, because the machine already matches the
-description. That property -- safe to reapply, because it only acts on
-the difference -- is the whole reason these tools were an improvement,
-and it's the same property Chapter 5 is going to name explicitly as a
-control loop\index{controlloop}.
+Puppet\index{Puppet}, Chef\index{Chef}, and Ansible \index{Ansible} were the
+first widely-adopted answer to this, and the shift they represent is worth
+naming precisely, because it's the same shift Kubernetes makes later, just at a
+smaller scope. The old workflow is a sequence of commands: SSH in, run this,
+run that, check if it worked. A Puppet manifest or an Ansible playbook is a
+description of what the machine should look like -- this package installed,
+this file containing this content, this service running -- and the tool's job
+is to look at the machine, compare it to the description, and make only the
+changes needed to close the gap. Run the same playbook twice and the second run
+should do nothing, because the machine already matches the description. That
+property -- safe to reapply, because it only acts on the difference -- is the
+whole reason these tools were an improvement, and it's the same property
+Chapter 5 is going to name explicitly as a control loop\index{control loop}.
 
 It wasn't a complete fix. These tools still ran on a schedule, or on
 demand, not continuously, so drift could reopen between runs, and someone
@@ -116,17 +181,17 @@ nobody was likely to stumble onto it in the time it took you to notice
 and fix it is no longer safe on that assumption -- something is checking,
 right now, and will check again in an hour.
 
-Second, the supply chain became a target in its own right. A compromised
-build dependency, a poisoned base image, a maintainer's stolen credentials
-on a widely-used package -- these don't require finding a hole in your
-infrastructure at all. They ride in through the normal process of
-building and deploying software, the same process every other chapter in
-this book is about making safer, not riskier. Ransomware-as-a-service
-turned the profit motive behind all of this into something available to
-anyone willing to pay for access, not just a small number of technically
-sophisticated actors. The threat model isn't "a skilled attacker might
-target us specifically" anymore. It's "automated tooling will find
-whatever's exposed, and someone downstream will monetize it."
+Second, the supply chain\index{supply chain} became a target in its own right.
+A compromised build dependency, a poisoned base image, a maintainer's stolen
+credentials on a widely-used package -- these don't require finding a hole in
+your infrastructure at all. They ride in through the normal process of building
+and deploying software, the same process every other chapter in this book is
+about making safer, not riskier. Ransomware-as-a-service\index{ransomware}
+turned the profit motive behind all of this into something available to anyone
+willing to pay for access, not just a small number of technically sophisticated
+actors. The threat model isn't "a skilled attacker might target us
+specifically" anymore. It's "automated tooling will find whatever's exposed,
+and someone downstream will monetize it."
 
 ### No diff, no review, no rollback
 
@@ -141,15 +206,15 @@ clean way to know what it changed or to undo it, because undoing it means
 remembering, by hand, what it was before.
 
 Version-controlled infrastructure closes that gap by construction, not by
-policy. When the desired state\index{desiredstate} of a server or a cluster lives in a git
-repository, every change is a commit: who made it, when, exactly what
-changed, and -- if the review discipline from ordinary software
-engineering gets applied here too -- someone else looked at it before it
-took effect. A bad change is `git revert`, not an afternoon of
-archaeology. This isn't a new security control bolted onto infrastructure
-that used to lack one. It's the existing discipline of code review and
-version control, already trusted for the application, extended to cover
-the infrastructure that application runs on.
+policy. When the desired state\index{desiredstate} of a server or a cluster
+lives in a git repository, every change is a commit: who made it, when, exactly
+what changed, and -- if the review discipline from ordinary software
+engineering gets applied here too -- someone else looked at it before it took
+effect. A bad change is `git revert`, not an afternoon of archaeology. This
+isn't a new security control bolted onto infrastructure that used to lack one.
+It's the existing discipline of code review and version control, already
+trusted for the application, extended to cover the infrastructure that
+application runs on.
 
 ### If it's not in git, it shouldn't be running
 
@@ -173,28 +238,29 @@ this same idea, worked out at increasing scale.
 
 ### What a container actually is, briefly
 
-A container is not a lightweight virtual machine, even though it gets
-described that way often enough that the description sticks. A VM
-virtualizes hardware and boots a full second kernel on top of it. A
-container is just an ordinary process on the host, running under the
-same kernel as everything else, made to believe it's alone through three
-mechanisms working together: **namespaces** hide everything the process
-shouldn't see -- its own process ID space, its own network interfaces,
-its own filesystem mounts, so `ps` inside the container shows a handful
-of processes, not the host's real few hundred. **cgroups** cap what the
-process is allowed to consume -- CPU, memory, I/O -- so one runaway
-container can't starve everything else on the box. And a **union
-filesystem** layers a stack of read-only image layers under one
-writable layer on top, so the container appears to have its own private
-filesystem without needing to actually copy the whole thing.
+A container\index{container} is not a lightweight virtual machine\index{virtual
+machine}, even though it gets described that way often enough that the
+description sticks. A VM virtualizes hardware and boots a full second kernel on
+top of it. A container is just an ordinary process on the host, running under
+the same kernel as everything else, made to believe it's alone through three
+mechanisms working together: **namespaces**\index{namespace} hide everything
+the process shouldn't see -- its own process ID space, its own network
+interfaces, its own filesystem mounts, so `ps` inside the container shows a
+handful of processes, not the host's real few hundred.
+**cgroups**\index{cgroup} cap what the process is allowed to consume -- CPU,
+memory, I/O -- so one runaway container can't starve everything else on the
+box. And a **union filesystem**\index{union filesystem} layers a stack of
+read-only image layers under one writable layer on top, so the container
+appears to have its own private filesystem without needing to actually copy the
+whole thing.
 
 None of that is magic, and none of it requires believing anything about
 containers being a fundamentally new kind of computing. It's namespacing,
-resource limiting, and clever filesystem layering, and Docker's actual
-contribution in 2013 wasn't inventing any of these three mechanisms --
-Linux had namespaces and cgroups already, and LXC had been wiring them
-together for years before Docker existed. Docker's contribution was
-making the packaging and distribution of the result trivial: a
+resource limiting, and clever filesystem layering, and Docker's\index{Docker}
+actual contribution in 2013 wasn't inventing any of these three mechanisms --
+Linux\index{Linux} had namespaces and cgroups already, and LXC\index{LXC} had
+been wiring them together for years before Docker existed. Docker's
+contribution was making the packaging and distribution of the result trivial: a
 `Dockerfile`, a build command, and an image anyone else can pull and run
 without caring how any of those three mechanisms actually work.
 
@@ -254,19 +320,19 @@ discards its intermediate state.
 
 ### A short history, and why "works in the container" is a stronger claim
 
-`chroot` gave a process its own root filesystem view in 1979 -- the
-oldest of these three mechanisms by a wide margin, and proof this idea
-isn't new. LXC, starting around 2008, was the first attempt to wire
-namespaces and cgroups together into something usable as "a container,"
-and it worked, but using it meant understanding all three mechanisms
-individually and assembling them by hand. Docker's 2013 release didn't
-replace any of that machinery -- early Docker used LXC directly under
-the hood -- it replaced the assembly step with a `Dockerfile` and a
-single `docker build`, and that packaging leap is what actually took off.
-The OCI (Open Container Initiative) standardization that followed
-formalized the image format itself, which is why an image built by
-Docker runs fine under containerd or Podman today -- the format outlived
-the tool that popularized it.
+`chroot`\index{chroot} gave a process its own root filesystem view in 1979 --
+the oldest of these three mechanisms by a wide margin, and proof this idea
+isn't new. LXC, starting around 2008, was the first attempt to wire namespaces
+and cgroups together into something usable as "a container," and it worked, but
+using it meant understanding all three mechanisms individually and assembling
+them by hand. Docker's 2013 release didn't replace any of that machinery --
+early Docker used LXC directly under the hood -- it replaced the assembly step
+with a `Dockerfile` and a single `docker build`, and that packaging leap is
+what actually took off.  The OCI (Open Container Initiative)\index{OCI (Open
+Container Initiative)} standardization that followed formalized the image
+format itself, which is why an image built by Docker runs fine under containerd
+or Podman\index{Podman} today -- the format outlived the tool that popularized
+it.
 
 "Works on my machine" was never a claim about the code; it was a claim
 about everything *surrounding* the code on that one machine -- library
@@ -293,7 +359,7 @@ The OCI image spec itself, for anyone who wants to see exactly what
 enough to read in one sitting and worth it once namespaces and cgroups
 stop being new.
 
-## Docker Compose: Orchestration's Training Wheels
+## Docker Compose\index{Docker Compose}: Orchestration's Training Wheels
 
 ### One file, two services, one command
 
