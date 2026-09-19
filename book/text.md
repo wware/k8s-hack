@@ -162,9 +162,9 @@ This book draws on three repositories, each anchoring a different part.
 
 | Repo | Anchors | What it actually is |
 |---|---|---|
-| `github:wware/k8s-hack` | Parts I-IV (Chapters 1-18) | This book's own source, plus the toy API and Kubernetes manifests every hands-on chapter through Chapter 18 walks through directly |
-| `github:wware/gitops-lab` | Part IV (Chapters 13-18) | A working kind + ArgoCD + Gitea setup: the `k8s-hack` Application, the `gitops-lab-envs` ApplicationSet, and the KEDA/RabbitMQ demo, all live and referenced with real command output |
-| `github:wware/gitops_reconciler` | Part V (Chapters 19-22) | The backend-agnostic reconciler -- `BackEnd`, `ManagedTarget`, `tick()` -- plus the Compose demo and the staging/prod promotion example |
+| `github:wware/k8s-hack`\index{k8s-hack repo} | Parts I-IV (Chapters 1-18) | This book's own source, plus the toy API and Kubernetes manifests every hands-on chapter through Chapter 18 walks through directly |
+| `github:wware/gitops-lab`\index{gitops-lab repo} | Part IV (Chapters 13-18) | A working kind + ArgoCD + Gitea setup: the `k8s-hack` Application, the `gitops-lab-envs` ApplicationSet, and the KEDA/RabbitMQ demo, all live and referenced with real command output |
+| `github:wware/gitops_reconciler`\index{gitops-reconciler repo} | Part V (Chapters 19-22) | The backend-agnostic reconciler -- `BackEnd`, `ManagedTarget`, `tick()` -- plus the Compose demo and the staging/prod promotion example |
 
 **Suggested reading order**, if not reading start to finish: Parts I-III
 (Chapters 1-12) stand alone as a Kubernetes fundamentals course and don't
@@ -228,7 +228,7 @@ clean way to know what it changed or to undo it, because undoing it means
 remembering, by hand, what it was before.
 
 Version-controlled infrastructure closes that gap by construction, not by
-policy. When the desired state\index{desiredstate} of a server or a cluster
+policy. When the desired state\index{desired state} of a server or a cluster
 lives in a git repository, every change is a commit: who made it, when, exactly
 what changed, and -- if the review discipline from ordinary software
 engineering gets applied here too -- someone else looked at it before it took
@@ -462,7 +462,7 @@ This is the whole deployment: one file, one command, and a `docker-compose.yml`
 that a new developer can read top to bottom in under a minute and
 understand exactly what's going to run. There's no cluster to provision
 first, no separate image-loading step -- Kubernetes will need one later,
-a `minikube image load` -- Compose builds straight from the Dockerfile
+a `minikube image load`\index{minikube} -- Compose builds straight from the Dockerfile
 and runs it on the same Docker daemon, immediately. That's real, and it's
 why Compose is still the right answer for local development even on a
 project that deploys to Kubernetes in production: the fastest path from
@@ -512,15 +512,15 @@ up: Compose has one Docker daemon to talk to, on one host, so "which of N
 machines should this container run on" isn't a question Compose is even
 positioned to ask.
 
-Rolling updates hit a version of the same wall. `docker compose up
---build` after changing `app.py` stops the old `api` container and starts
-a new one -- not simultaneously, not with the old one kept alive until the
-new one proves itself healthy. Chapter 8 will show Kubernetes rejecting a
-bad `ConfigMap\index{configmap}` change this same way, without ever taking `toy-api` down.
-Compose's healthcheck exists and works, as `postgres`'s did above,
-but nothing in Compose reads it to decide whether it's safe to remove an
-old container yet. That gating logic is exactly what a Deployment's
-rolling update adds on top of the same healthcheck idea.
+Rolling updates hit a version of the same wall. `docker compose up --build`
+after changing `app.py` stops the old `api` container and starts a new one --
+not simultaneously, not with the old one kept alive until the new one proves
+itself healthy. Chapter 8 will show Kubernetes rejecting a bad
+`ConfigMap`\index{ConfigMap} change this same way, without ever taking
+`toy-api` down.  Compose's healthcheck exists and works, as `postgres`'s did
+above, but nothing in Compose reads it to decide whether it's safe to remove an
+old container yet. That gating logic is exactly what a Deployment's rolling
+update adds on top of the same healthcheck idea.
 
 ### The right tool until it isn't
 
@@ -598,7 +598,7 @@ kube-scheduler-minikube            1/1     Running   0             25h
 storage-provisioner                1/1     Running   2 (16h ago)   25h
 ```
 
-`kube-apiserver-minikube`, `kube-scheduler-minikube`,
+`kube-apiserver-minikube`\index{minikube}, `kube-scheduler-minikube`,
 `kube-controller-manager-minikube`, `etcd-minikube` -- the four pieces
 usually drawn as a special box labeled "control plane" in every
 Kubernetes diagram -- are just pods, in this same `kubectl get pods`
@@ -1386,17 +1386,28 @@ services:
 `postgres`'s healthcheck before it starts, both reachable on their mapped
 ports. That's the whole deployment.
 
-The Kubernetes version of the identical app -- same image, same Postgres,
-same environment variables -- is seven YAML files totaling 201 lines
-(`postgres-configmap.yaml`, `postgres-secret.yaml`, `postgres-pvc.yaml`,
-`postgres-statefulset.yaml`, `postgres-service.yaml`, `deployment.yaml`,
-`service.yaml`), plus `start.sh`, 63 lines of shell to apply them in the
-right order and wait for each one to actually come up before moving on to
-the next. That's not a criticism of either file -- both are doing what
-they were designed to do, correctly. It's the actual, measured cost of
-the thing Chapter 5 called a control loop: seven times more YAML, plus an
-orchestration script Compose doesn't need at all, to run the same two
-containers on the same one machine.
+The Kubernetes version of the identical app -- same image, same Postgres, same
+environment variables -- splits every concern into its own file. For the
+stateful part (Postgres): a ConfigMap\index{ConfigMap} for non-secret config, a
+Secret\index{Secret} for the password, a PVC\index{PVC} for persistent storage,
+a StatefulSet\index{StatefulSet} for the workload itself, and a
+Service\index{Service} for networking. For the stateless part (the API): a
+Secret for its API key, a Deployment\index{Deployment} for the workload, and a
+Service. That pattern -- config, secrets, storage (if stateful), workload
+controller, networking -- is what you'll see in most Kubernetes setups, with
+the specific controllers and object counts varying based on what needs to be
+stateful and what doesn't.
+
+Concretely, that's eight YAML files totaling 201 lines. Five for Postgres:
+`postgres-configmap.yaml`, `postgres-secret.yaml`, `postgres-pvc.yaml`,
+`postgres-statefulset.yaml`, and `postgres-service.yaml`. Three for the
+API: `api-key-secret.yaml`, `deployment.yaml`, and `service.yaml`. Plus
+`start.sh`, 63 lines of shell to apply them in the right order and wait
+for each one to actually come up before moving on to the next. That's not a criticism of either
+approach -- both are doing what they were designed to do, correctly. It's the
+actual, measured cost of the thing Chapter 5 called a control loop: eight times
+more YAML, plus an orchestration script Compose doesn't need at all, to run the
+same two containers on the same one machine.
 
 ### What all that extra machinery is buying, here, right now
 
@@ -2839,19 +2850,18 @@ Balancer Controller provisioning a real ALB. That layer doesn't transfer
 to a home LAN, and pretending it does would defeat the point of
 practicing.
 
-**Proxmox as an honest middle ground.** Running kubeadm across multiple
-physical machines is the most direct emulation, but Proxmox VE on a
+**Proxmox\index{Proxmox} as an honest middle ground.** Running kubeadm across
+multiple physical machines is the most direct emulation, but Proxmox VE on a
 single box gives multi-node cluster mechanics without needing separate
-hardware. Three or four VMs -- one control plane, two or three workers
--- running kubeadm produces real multi-node scheduling, real network
-partitions if a VM goes down, real distributed etcd. Each VM is an
-actual separate Linux instance with its own kernel and network stack,
-the same as an EC2 instance, just sharing one hypervisor instead of
-occupying separate machines. The jump from Proxmox to real EKS is
-narrower than the jump from kind's container-based "nodes," because the
-latter never actually gave you separate machines with separate IPs and
-real inter-node network hops. Proxmox does, without the monthly bill or
-the need for a closet full of old desktops.
+hardware. Three or four VMs -- one control plane, two or three workers --
+running kubeadm produces real multi-node scheduling, real network partitions if
+a VM goes down, real distributed etcd. Each VM is an actual separate Linux
+instance with its own kernel and network stack, the same as an EC2 instance,
+just sharing one hypervisor instead of occupying separate machines. The jump
+from Proxmox to real EKS is narrower than the jump from kind's container-based
+"nodes," because the latter never actually gave you separate machines with
+separate IPs and real inter-node network hops. Proxmox does, without the
+monthly bill or the need for a closet full of old desktops.
 
 What does transfer, closely, with real stand-ins rather than fakes:
 Calico or Cilium for CNI -- both are officially supported alternatives on
