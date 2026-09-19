@@ -11,3 +11,17 @@
   breaklines,breaksymbolleft={},
   fontsize=\small
 }
+
+% Glossary - pure definitions without page numbers
+% Using 'toc' to add to table of contents
+% Using 'nonumberlist' to suppress page numbers (Index provides those)
+% Using 'nopostdot' to remove trailing periods after descriptions
+\usepackage[toc,nonumberlist,nopostdot]{glossaries}
+\makeglossaries
+\input{glossary.tex}
+% Print all glossary entries even if not explicitly referenced
+\glsaddall
+
+% Index for page references
+\usepackage{imakeidx}
+\makeindex[intoc,columns=2,title=Index]

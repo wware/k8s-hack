@@ -39,7 +39,7 @@ emergencies, and not the one you just brought up from the same base image
 that's supposedly identical to it. Two servers built from the same
 starting point stop being identical the first time someone touches one of
 them by hand and not the other. There's no mechanism forcing them back
-into agreement, so unless someone is deliberately auditing for drift --
+into agreement, so unless someone is deliberately auditing for drift\index{drift} --
 and auditing for drift by hand doesn't scale past a small number of
 servers -- they just keep diverging.
 
@@ -58,7 +58,7 @@ second run should do nothing, because the machine already matches the
 description. That property -- safe to reapply, because it only acts on
 the difference -- is the whole reason these tools were an improvement,
 and it's the same property Chapter 5 is going to name explicitly as a
-control loop.
+control loop\index{controlloop}.
 
 It wasn't a complete fix. These tools still ran on a schedule, or on
 demand, not continuously, so drift could reopen between runs, and someone
@@ -141,7 +141,7 @@ clean way to know what it changed or to undo it, because undoing it means
 remembering, by hand, what it was before.
 
 Version-controlled infrastructure closes that gap by construction, not by
-policy. When the desired state of a server or a cluster lives in a git
+policy. When the desired state\index{desiredstate} of a server or a cluster lives in a git
 repository, every change is a commit: who made it, when, exactly what
 changed, and -- if the review discipline from ordinary software
 engineering gets applied here too -- someone else looked at it before it
@@ -428,7 +428,7 @@ Rolling updates hit a version of the same wall. `docker compose up
 --build` after changing `app.py` stops the old `api` container and starts
 a new one -- not simultaneously, not with the old one kept alive until the
 new one proves itself healthy. Chapter 8 will show Kubernetes rejecting a
-bad `ConfigMap` change this same way, without ever taking `toy-api` down.
+bad `ConfigMap\index{configmap}` change this same way, without ever taking `toy-api` down.
 Compose's healthcheck exists and works, as `postgres`'s did above,
 but nothing in Compose reads it to decide whether it's safe to remove an
 old container yet. That gating logic is exactly what a Deployment's
@@ -557,9 +557,9 @@ object instead of one file per application:
 | Compose concept | Kubernetes equivalent |
 |---|---|
 | `services.api` | Deployment (`deployment.yaml`) |
-| `services.postgres` | StatefulSet (`postgres-statefulset.yaml`) -- Chapter 6 covers why a database gets a different object than a stateless service |
+| `services.postgres` | StatefulSet\index{statefulset} (`postgres-statefulset.yaml`) -- Chapter 6 covers why a database gets a different object than a stateless service |
 | `ports: "8000:8000"` | Service (`service.yaml`) -- a stable address, decoupled from any one container |
-| `environment:` (non-secret values) | ConfigMap (`postgres-configmap.yaml`) |
+| `environment:` (non-secret\index{secret} values) | ConfigMap (`postgres-configmap.yaml`) |
 | `environment:` (`POSTGRES_PASSWORD`) | Secret (`postgres-secret.yaml`) |
 | `volumes: postgres_data:...` | PersistentVolumeClaim (`postgres-pvc.yaml`) |
 | `healthcheck:` | `livenessProbe` / `readinessProbe` on the pod spec |
@@ -825,7 +825,7 @@ StatefulSet's guarantees are exactly two: stable identity, stable storage.
 That's all `postgres-statefulset.yaml` is promising. It says nothing about
 replication, nothing about failover if the node running `postgres-0` dies,
 nothing about backups. Real production databases close that gap with an
-Operator sitting on top of the StatefulSet -- more on that later.
+Operator\index{operator} sitting on top of the StatefulSet -- more on that later.
 
 ## Self-Healing and Scaling
 
@@ -1790,7 +1790,7 @@ requests, not the same request either way.
 
 Cluster RBAC is a separate system, answering a separate question, and
 this repo's manifests never touch it -- no `Role`, no `RoleBinding`, no
-`ServiceAccount` of its own. Check what identity the `toy-api` pods
+`ServiceAccount\index{serviceaccount}` of its own. Check what identity the `toy-api` pods
 actually run under:
 
 ```shell
@@ -1947,7 +1947,7 @@ nothing was ever asked for. A real operator sits somewhere in between,
 and getting that middle right is a RoleBinding written on purpose, not a
 default nobody thought about.
 
-# Part IV -- GitOps: Extending the Pattern into DevOps
+# Part IV -- GitOps\index{gitops}: Extending the Pattern into DevOps
 
 ## Git as the Control Plane
 
@@ -2103,7 +2103,7 @@ toy-api-8467757567-kx8t6   1/1     Running       0          18d
 
 Two of the five pods this command just started are already
 `Terminating` before they even finish coming up. This Application has
-`selfHeal: true` set -- the syncPolicy block from `argocd-k8s-hack.yaml`
+`selfHeal\index{selfheal}: true` set -- the syncPolicy block from `argocd-k8s-hack.yaml`
 above -- so ArgoCD isn't waiting for anyone to notice the drift and click
 Sync. It's actively defending git's declared state against exactly the
 kind of manual change that just happened, correcting it faster than the
@@ -2313,7 +2313,7 @@ it actually sits, is worth remembering the next time something that's
 ### Three environments, one template
 
 Everything so far in Part IV has been one Application watching one
-path in one repo. The `gitops-lab-envs` ApplicationSet sitting in the
+path in one repo. The `gitops-lab-envs` ApplicationSet\index{applicationset} sitting in the
 same cluster is a different shape entirely -- one generator, scanning a
 directory, producing as many Applications as it finds matching
 subdirectories:
@@ -2698,7 +2698,7 @@ minimally-provisioned cluster with two `t3.medium` nodes, a load
 balancer, and a NAT gateway at $210-265 a month, running whether or not
 anything is actually processing work. That number is the honest price of
 everything Part III and this Part have been walking through for free:
-self-healing, multi-node scheduling, the whole reconciliation-loop
+self-healing, multi-node scheduling, the whole reconciliation\index{reconciliation}-loop
 apparatus. None of it is free to run for real, and the fixed costs --
 control plane, NAT gateway -- don't scale down with idle time the way
 KEDA scales pods down to zero. A cluster costs the same at 2am with
@@ -3072,7 +3072,7 @@ The obvious instinct, coming from Terraform or Pulumi, is to split
 way `terraform plan` and `terraform apply` are two separate commands.
 `gitops_reconciler` considered this and rejected it, for a reason that's
 almost tautological once it's stated plainly: all three cloud backends
-are idempotent by construction, which means a full diff against reality
+are idempotent\index{idempotent} by construction, which means a full diff against reality
 is *inherent* to what `apply()` already has to do before it decides
 whether to change anything. A no-op tick costs exactly the same diff
 work whether the wrapper calls `plan()` and skips `apply()`, or just
@@ -3711,83 +3711,11 @@ Highly recommended.
 
 # Glossary
 
-**ApplicationSet** -- an ArgoCD object that generates multiple `Application`
-objects from one template and a generator (e.g., a directory listing).
-Chapter 15.
+\printglossaries
 
-**BackEnd (ABC)** -- the abstract base class every `gitops_reconciler`
-backend implements: `apply()`, `destroy()`, `get_outputs()`. Chosen over
-a `Protocol` because Pydantic gives it a real `isinstance()` check.
-Chapters 19-20.
+# Index
 
-**Control loop** -- the pattern underlying every reconciliation system in
-this book: read desired state, observe actual state, act to close the
-gap, repeat forever. Chapter 5 and onward.
-
-**ConfigMap** -- a Kubernetes object holding non-secret configuration,
-injected into pods as environment variables or mounted files. Chapter 8.
-
-**Desired state** -- what a system is declared to look like, as opposed
-to what it currently looks like (actual state). The gap between the two
-is what every controller in this book exists to close.
-
-**Drift** -- when actual state no longer matches desired state, usually
-because something changed it directly rather than through the declared
-source of truth. Chapters 1, 14, 22.
-
-**GitOps** -- managing infrastructure by treating a git repository as the
-source of truth and running a controller that continuously reconciles
-real state to match it. Chapters 13-22.
-
-**HPA (HorizontalPodAutoscaler)** -- the Kubernetes object that scales a
-Deployment's replica count based on a metric. KEDA creates and drives a
-real HPA rather than replacing it. Chapter 16.
-
-**Idempotent** -- an operation that produces the same result whether run
-once or many times. `apply()` is supposed to be idempotent for every
-backend in `gitops_reconciler`; Compose and Pi fake it with a hash
-comparison since they have no native diff. Chapter 20.
-
-**IRSA (IAM Roles for Service Accounts)** -- the AWS mechanism binding a
-Kubernetes ServiceAccount to an IAM role via OIDC federation, so pods get
-scoped AWS credentials instead of inheriting the node's. Chapter 12.
-
-**KEDA (Kubernetes Event-Driven Autoscaling)** -- scales workloads based
-on external metrics (queue depth, etc.) rather than CPU/memory alone, by
-feeding a custom metric to a standard HPA. Chapter 16.
-
-**Operator** -- a controller, following the same watch-diff-act pattern
-as everything built into Kubernetes, that encodes domain-specific
-operational knowledge (e.g., how to run Postgres) on top of primitives
-like StatefulSet. Chapters 6, 9, 12.
-
-**Provenance (in this book's reconciler)** -- the git SHA recorded
-after a successful `apply()` call. The mechanism that makes Chapter
-22's promotion pattern possible without any new abstractions.
-
-**Reconciliation** -- the act of comparing desired and actual state and
-acting to close any gap. The verb behind every noun in this glossary.
-
-**RBAC (Role-Based Access Control)** -- Kubernetes' system for
-controlling which identities can perform which actions against the API
-server, via Roles and RoleBindings (or ClusterRole/ClusterRoleBinding).
-Distinct from application-level auth. Chapter 12.
-
-**Secret** -- a Kubernetes object like ConfigMap, but for sensitive
-values -- base64-encoded (not encrypted) by default, masked in `kubectl
-describe` output. Chapter 8.
-
-**selfHeal** -- an ArgoCD Application syncPolicy setting that
-automatically reverts manual changes to match git, rather than just
-flagging them as `OutOfSync`. Chapter 14.
-
-**ServiceAccount** -- the identity a pod runs as when it talks to the
-Kubernetes API. Defaults to `default` with no permissions unless a Role
-is explicitly bound to it. Chapters 12, 21.
-
-**StatefulSet** -- a Kubernetes controller for workloads needing stable
-identity and stable storage across rescheduling. Guarantees stop there --
-no built-in replication, failover, or backups. Chapter 6.
+\printindex
 
 # Repository Map
 

@@ -13,9 +13,9 @@ GEOMETRY := paperwidth=8.5in,paperheight=11in,inner=1in,outer=0.5in,top=0.5in,bo
 
 all: $(PDF)
 
-$(PDF): $(SRC) $(PREAMBLE) $(AFTER_TITLE)
+$(PDF): $(SRC) $(PREAMBLE) $(AFTER_TITLE) glossary.tex
 	pandoc $(SRC) \
-		-o $(PDF) \
+		-o book.tex \
 		--pdf-engine=xelatex \
 		--from=markdown \
 		--top-level-division=part \
@@ -32,6 +32,13 @@ $(PDF): $(SRC) $(PREAMBLE) $(AFTER_TITLE)
 		--variable=date:"$(DATE)" \
 		--variable=secnumdepth:0 \
 		--toc
+	xelatex book.tex
+	makeglossaries book
+	makeindex book
+	xelatex book.tex
+	xelatex book.tex
+	@if [ "book.pdf" != "$(PDF)" ]; then mv book.pdf $(PDF); fi
+	rm -f book.tex book.aux book.log book.out book.toc book.glo book.gls book.glg book.ist book.idx book.ilg book.ind
 
 clean:
 	rm -f $(PDF)
