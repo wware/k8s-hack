@@ -1,6 +1,8 @@
-# From Pet Servers to Cattle
+# Part I -- Why Any of This Exists
 
-## SSH in, hand-edit, restart, hope
+## From Pet Servers to Cattle
+
+### SSH in, hand-edit, restart, hope
 
 The old workflow doesn't need much reconstruction because most people who'd
 pick up this book have lived some version of it: `ssh` into the box, `vim`
@@ -17,7 +19,7 @@ comment you left in the file, if you left one. Six months later, "why is
 this set to 30 instead of the default of 10" has one honest answer: ask
 whoever did it, if they still work there, if they remember.
 
-## Snowflakes, and the gap between "works" and "works reliably"
+### Snowflakes, and the gap between "works" and "works reliably"
 
 Do this enough times, on enough servers, and every server drifts into
 being slightly different from every other one -- not because anyone
@@ -41,7 +43,7 @@ into agreement, so unless someone is deliberately auditing for drift --
 and auditing for drift by hand doesn't scale past a small number of
 servers -- they just keep diverging.
 
-## Describe, don't do
+### Describe, don't do
 
 Puppet, Chef, and Ansible were the first widely-adopted answer to this,
 and the shift they represent is worth naming precisely, because it's the
@@ -64,7 +66,7 @@ still had to remember to run them. But the core move -- write down what
 the machine should look like, then let a tool make it true -- is the same
 move every chapter after this one keeps making at a larger scope.
 
-## Physical servers to orchestrated containers, briefly
+### Physical servers to orchestrated containers, briefly
 
 The rest of this progression is really the same idea, applied one layer
 up each time, as the unit being managed keeps shrinking and multiplying:
@@ -89,9 +91,9 @@ and keep desired counts correct, continuously, faster than any person
 could do it by hand. That something is the subject of the rest of this
 book.
 
-# The Security Case for Systematized Infrastructure
+## The Security Case for Systematized Infrastructure
 
-## Ad-hoc ops was always risky
+### Ad-hoc ops was always risky
 
 Chapter 1 made the productivity case against hand-edited servers: drift,
 lost context, nobody quite sure what's actually running. All of that is
@@ -103,7 +105,7 @@ happen*. An unauthorized change and an authorized-but-undocumented change
 look identical from the outside -- neither one shows up anywhere except
 in what the server is currently doing.
 
-## Why it's worse now
+### Why it's worse now
 
 Two things changed the stakes on top of that baseline risk. First, attack
 tooling industrialized. Scanning the entire public IPv4 address space for
@@ -126,7 +128,7 @@ sophisticated actors. The threat model isn't "a skilled attacker might
 target us specifically" anymore. It's "automated tooling will find
 whatever's exposed, and someone downstream will monetize it."
 
-## No diff, no review, no rollback
+### No diff, no review, no rollback
 
 Put those two together and the hand-edited server from Chapter 1 stops
 being merely inefficient and starts being a liability, for a specific,
@@ -149,7 +151,7 @@ that used to lack one. It's the existing discipline of code review and
 version control, already trusted for the application, extended to cover
 the infrastructure that application runs on.
 
-## If it's not in git, it shouldn't be running
+### If it's not in git, it shouldn't be running
 
 That's the principle worth carrying into every chapter after this one,
 because it's going to come back explicitly more than once: version
@@ -165,9 +167,11 @@ gets automated away entirely, git no longer just describing infrastructure
 but actively defending it. Everything between here and there is really
 this same idea, worked out at increasing scale.
 
-# Docker: Packaging Reality
+# Part II -- Containers Before Orchestration
 
-## What a container actually is, briefly
+## Docker: Packaging Reality
+
+### What a container actually is, briefly
 
 A container is not a lightweight virtual machine, even though it gets
 described that way often enough that the description sticks. A VM
@@ -194,7 +198,7 @@ making the packaging and distribution of the result trivial: a
 `Dockerfile`, a build command, and an image anyone else can pull and run
 without caring how any of those three mechanisms actually work.
 
-## Images vs. containers, and the Dockerfile as a recipe
+### Images vs. containers, and the Dockerfile as a recipe
 
 The distinction that trips people up first: an image is not a container,
 it's what a container is made from. This repo's `Dockerfile` is short
@@ -248,7 +252,7 @@ in the specific sense that each step describes an incremental change to
 apply on top of the last one, not a script that runs top to bottom and
 discards its intermediate state.
 
-## A short history, and why "works in the container" is a stronger claim
+### A short history, and why "works in the container" is a stronger claim
 
 `chroot` gave a process its own root filesystem view in 1979 -- the
 oldest of these three mechanisms by a wide margin, and proof this idea
@@ -278,7 +282,7 @@ committed file instead -- so it's worth having Chapter 3 be the place
 that move first gets named plainly, at the smallest possible scale, one
 image.
 
-## Further reading
+### Further reading
 
 Docker's own "Get Started" guide is still the fastest way to build the
 muscle memory for `build`/`run`/`exec` before any of the orchestration
@@ -289,9 +293,9 @@ The OCI image spec itself, for anyone who wants to see exactly what
 enough to read in one sitting and worth it once namespaces and cgroups
 stop being new.
 
-# Docker Compose: Orchestration's Training Wheels
+## Docker Compose: Orchestration's Training Wheels
 
-## One file, two services, one command
+### One file, two services, one command
 
 `docker-compose.yml` in this repo describes the same two-service app
 Chapter 3 built one image for -- `postgres` and `api` -- as a single YAML
@@ -364,7 +368,7 @@ container ID (`f2e4d42dc861`) instead of a Kubernetes pod name, because
 the container ID the same way Kubernetes sets it to the pod name. The
 logging code doesn't know or care which one it's running under.
 
-## What Compose gets right
+### What Compose gets right
 
 This is the whole deployment: one file, one command, and a `docker-compose.yml`
 that a new developer can read top to bottom in under a minute and
@@ -377,7 +381,7 @@ project that deploys to Kubernetes in production: the fastest path from
 "clone the repo" to "the app is running and I can poke at it" almost
 never runs through a cluster.
 
-## Where the ceiling actually is
+### Where the ceiling actually is
 
 Push on it a little and the ceiling stops being theoretical. Ask Compose
 for three copies of `api` instead of one:
@@ -430,7 +434,7 @@ but nothing in Compose reads it to decide whether it's safe to remove an
 old container yet. That gating logic is exactly what a Deployment's
 rolling update adds on top of the same healthcheck idea.
 
-## The right tool until it isn't
+### The right tool until it isn't
 
 None of this makes `docker-compose.yml` worse than the seven YAML files
 from Chapter 9's comparison -- it's 41 lines against 201, and for a
@@ -445,9 +449,11 @@ there's a full Kubernetes deployment to compare it against squarely. For
 now, the ceiling is the point: everything Compose can't do in this
 chapter is a preview of what the next several chapters exist to fix.
 
-# What Kubernetes Actually Is
+# Part III -- Kubernetes Fundamentals
 
-## The control loop, not the orchestrator
+## What Kubernetes Actually Is
+
+### The control loop, not the orchestrator
 
 Chapter 4 ended at Compose's ceiling: one host, and nothing watching over
 it once `docker compose up` returns. That second part is the real gap.
@@ -485,7 +491,7 @@ anticipated failures -- it just keeps rechecking, so anything that
 knocks `actual` out of line with `desired` gets corrected the same way,
 whether you predicted it or not.
 
-## The control plane is not magic -- it's pods
+### The control plane is not magic -- it's pods
 
 Ask this cluster what's actually running its control plane:
 
@@ -540,7 +546,7 @@ the right pods. Nothing here is a black box. It's the same watch-diff-act
 loop from the last section, six times, each instance responsible for one
 slice of "does reality match the spec."
 
-## Mapping what you already know
+### Mapping what you already know
 
 Chapter 4 walked through this repo's `docker-compose.yml` -- two
 services, `postgres` and `api`, each described by roughly a dozen lines.
@@ -570,16 +576,16 @@ to be available, for as long as the cluster exists. Same information,
 different verb tense -- Compose says "do this," Kubernetes says "keep
 this true."
 
-# Your First Deployment
+## Your First Deployment
 
-## `./start.sh`: containers + orchestration, not magic
+### `./start.sh`: containers + orchestration, not magic
 
 The shell script `start.sh` establishes the prerequisites you'll need for a
 small local Kubernetes setup with Minikube. Simply running this script and
 watching the messages it produces is illuminating.  Useful, important stuff is
 happening, but there is nothing incomprehensible going on.
 
-## Deployments, Services, and the separation of "what runs" from "how it's reached"
+### Deployments, Services, and the separation of "what runs" from "how it's reached"
 
 Open `deployment.yaml` and `service.yaml` side by side. They're two different
 objects because they answer two different questions.
@@ -664,7 +670,7 @@ image and scale back up. Real deployments avoid the whole problem with
 immutable, content-addressed tags -- a git SHA or build digest -- so the
 tag itself is proof of what's running, not just a label that might be stale.
 
-## StatefulSets, and why databases aren't just "a Deployment with a volume"
+### StatefulSets, and why databases aren't just "a Deployment with a volume"
 
 The toy API is a Deployment. Postgres is a StatefulSet. They look almost
 identical in the YAML -- same containers, same probes, same resource limits --
@@ -753,7 +759,7 @@ value is the data sitting on disk, tied to one specific process. The
 StatefulSet exists to preserve exactly that identity: this pod, this volume,
 every time.
 
-## Hands-on: deploying the toy API + Postgres from this repo
+### Hands-on: deploying the toy API + Postgres from this repo
 
 `start.sh` runs all of the above, in the order it has to happen. Worth
 reading top to bottom once, because the order isn't arbitrary:
@@ -778,7 +784,7 @@ reading top to bottom once, because the order isn't arbitrary:
 9. Print instructions for reaching the API yourself afterward
 
 Run it and read the output as it happens rather than skipping to the end.
-The `⏳ Waiting for PostgreSQL to be ready` line means what it says --
+The `Waiting for PostgreSQL to be ready` line means what it says --
 until Postgres's own `pg_isready` check passes, nothing else is allowed to
 proceed, because the API pods talk to Postgres on startup and gain nothing
 by starting before there's a database to talk to. When it works, the
@@ -786,7 +792,7 @@ whole thing looks almost boring: build, load, apply, wait, test, done.
 That's the point. There's no step in here that isn't something you could
 explain to someone else in one sentence.
 
-## The YAML files as promises kept
+### The YAML files as promises kept
 
 Go back through every file `start.sh` applied, but read them a second time
 with a different question in mind: not "what does this field do" but "what
@@ -821,9 +827,9 @@ replication, nothing about failover if the node running `postgres-0` dies,
 nothing about backups. Real production databases close that gap with an
 Operator sitting on top of the StatefulSet -- more on that later.
 
-# Self-Healing and Scaling
+## Self-Healing and Scaling
 
-## Deleting a pod on purpose and watching Kubernetes notice
+### Deleting a pod on purpose and watching Kubernetes notice
 
 With the toy API and Postgres both running, list the current pods and
 delete one of the `toy-api` ones directly:
@@ -867,7 +873,7 @@ crashing and killing a pod by accident look identical from the controller's
 point of view: the observed state stopped matching the desired state, so it
 acts.
 
-## Declarative intent: a standing order, not a one-time command
+### Declarative intent: a standing order, not a one-time command
 
 This is different from a script triggered by a commit hook or a CI/CD pipeline.
 A shell script that runs `docker run` twice starts two containers and then it's
@@ -881,7 +887,7 @@ That's why deleting a pod gets you a replacement but deleting the
 Deployment itself does not -- the standing order is gone, so there's
 nothing left to re-check against.
 
-## Scaling out: easy for the API, meaningless for the database
+### Scaling out: easy for the API, meaningless for the database
 
 Scaling the API is a one-line change in intent:
 
@@ -958,7 +964,7 @@ far as `postgres-0` is concerned, because it never did -- it was inserted
 into a different process's disk entirely, and that process is gone now
 that `postgres-1` has been scaled away.
 
-## Load balancing across replicas, observed via logs
+### Load balancing across replicas, observed via logs
 
 Back on the API side, scale up again and send a batch of requests at the
 Service, hitting its NodePort directly rather than any one pod:
@@ -999,9 +1005,9 @@ smooth out over a few thousand. The behavior worth internalizing isn't
 "perfectly balanced" -- it's "any of these four processes can answer, and
 the caller never had to know or care which one did."
 
-# Configuration, Secrets, and Storage
+## Configuration, Secrets, and Storage
 
-## Editing a ConfigMap live, and finding the edge of "hot reload"
+### Editing a ConfigMap live, and finding the edge of "hot reload"
 
 `postgres-config` holds the non-secret pieces of the database connection --
 host, port, database name, username -- and `deployment.yaml` wires each one
@@ -1108,7 +1114,7 @@ the previously-healthy old pod it never managed to replace, cleaned up in
 the same rollout once a working replacement finally passed its
 readiness probe.
 
-## PersistentVolumeClaims: storage that outlives the pod
+### PersistentVolumeClaims: storage that outlives the pod
 
 Chapter 6 covered why `postgres-pvc.yaml` exists -- the promise that data
 survives independent of any particular pod. Worth actually watching that
@@ -1149,7 +1155,7 @@ outlives the pod": not magic persistence, just the same PVC getting
 claimed again by whatever process the StatefulSet starts under that name
 next.
 
-## ConfigMap and Secret, side by side
+### ConfigMap and Secret, side by side
 
 `postgres-configmap.yaml` holds four fields -- host, port, database name,
 username. `postgres-secret.yaml` holds exactly one -- the password. Every
@@ -1159,7 +1165,7 @@ one more variable, `DATABASE_URL`, is built by string-substituting all
 five together.
 
 ```yaml
-# deployment.yaml, abbreviated
+## deployment.yaml, abbreviated
 env:
   - name: POSTGRES_HOST
     valueFrom:
@@ -1256,9 +1262,9 @@ should be enough to read a real password -- but that's a problem for a
 later chapter. What this repo demonstrates is the shape of the split, not
 yet the hardened version of it.
 
-# When Not to Use Kubernetes
+## When Not to Use Kubernetes
 
-## The same app, two ways
+### The same app, two ways
 
 This repo has both versions sitting side by side. `docker-compose.yml` is
 41 lines and two services:
@@ -1304,7 +1310,7 @@ the thing Chapter 5 called a control loop: seven times more YAML, plus an
 orchestration script Compose doesn't need at all, to run the same two
 containers on the same one machine.
 
-## What all that extra machinery is buying, here, right now
+### What all that extra machinery is buying, here, right now
 
 Go back through the "why Kubernetes" list from Chapter 5's control-loop
 framing -- multi-host scheduling, self-healing across machines, rolling
@@ -1333,7 +1339,7 @@ Chapter 5. But it's also exactly the shape of the mistake `WHY_KUBERNETES.md`
 warns about: reaching for the fleet-management tool before there's a
 fleet.
 
-## What running Kubernetes well actually requires
+### What running Kubernetes well actually requires
 
 The 201 lines of YAML are the part you write once. The part that doesn't
 show up in any file is what it costs to run this well past a learning
@@ -1352,7 +1358,7 @@ stable storage -- that a StatefulSet actually provides. That's a team's
 worth of ongoing attention, not a weekend project, and it's a cost that
 exists whether or not you're using any of the capacity it buys you.
 
-## Signs you don't need it yet, and signs you're about to
+### Signs you don't need it yet, and signs you're about to
 
 The `docker-compose.yml` in this repo is the honest baseline: one host,
 one team, a healthcheck and a restart policy cover the failure modes that
@@ -1371,9 +1377,9 @@ show for it -- which is exactly what this repo's minikube setup is,
 deliberately, as a place to learn the mechanics before you need them for
 real.
 
-# Infrastructure as Code, Take One: Pulumi
+## Infrastructure as Code, Take One: Pulumi
 
-## Same resources, different syntax
+### Same resources, different syntax
 
 Everything in Chapters 6 through 8 came from YAML files applied with
 `kubectl apply -f`. `pulumi/__main__.py` in this repo does the same kind
@@ -1431,7 +1437,7 @@ that will exist later." It also can't hand you a working URL without a
 second, separate shell command to go find the allocated port -- the same
 tradeoff in both directions.
 
-## Type checking and reusable modules
+### Type checking and reusable modules
 
 `k8s.core.v1.ConfigMap(...)`, `k8s.apps.v1.DeploymentSpecArgs(...)` --
 every one of these is a real Python class with a real constructor
@@ -1454,7 +1460,7 @@ Helm templates or Kustomize overlays to fight the same duplication, but
 that's reaching for a second tool to patch a gap in the first one. Pulumi
 just uses the language you're already in.
 
-## Where this file actually stands right now
+### Where this file actually stands right now
 
 This Pulumi program is not a clean parallel of the toy-api YAML from Chapters 6
 through 8. It deploys an image called `tg-core-graph-api:local`, from a
@@ -1476,7 +1482,7 @@ isn't clever tooling, it's the same discipline Chapter 2 argued for at the
 start: *if a description of the system lives outside the system's own declared
 state, it drifts, and the only real defense is noticing.*
 
-## When Pulumi earns its complexity over plain manifests
+### When Pulumi earns its complexity over plain manifests
 
 None of this makes Pulumi strictly better than YAML. It's more machinery: a
 language runtime, a package manager, a state backend that has to be reachable
@@ -1494,9 +1500,9 @@ when a real language starts paying for itself. A single toy API with one
 ConfigMap doesn't need it. This repo's own Pulumi file, three services deep and
 still growing, is starting to sit right at that line.
 
-# Observability Basics: Logging
+## Observability Basics: Logging
 
-## One line becomes three, and a pod name you didn't ask for
+### One line becomes three, and a pod name you didn't ask for
 
 Hit the running API once, with a request ID attached so it's easy to
 pick back out of the noise:
@@ -1554,7 +1560,7 @@ Miss wiring that ContextVar into some new code path -- a background task,
 a second thread -- and its log lines quietly stop carrying a `request_id`
 at all, with nothing to warn you.
 
-## The line the endpoint wrote vs. the line the formatter added
+### The line the endpoint wrote vs. the line the formatter added
 
 Try a request that fails on purpose:
 
@@ -1600,7 +1606,7 @@ a fair warning about the "log everything on the record" approach: the
 formatter doesn't know the difference between a field you meant to add
 and one the runtime left lying around.
 
-## Where the trail actually ends
+### Where the trail actually ends
 
 Send one more request, note which pod answers, and delete that pod on
 purpose:
@@ -1650,9 +1656,9 @@ written to stdout and shipping it somewhere that outlives the pod. The
 logging code in this repo was written for that day already; today it's
 just not running yet.
 
-# Authentication and Authorization Patterns
+## Authentication and Authorization Patterns
 
-## Two questions that sound like one
+### Two questions that sound like one
 
 "Who can do that" is actually two unrelated questions once there's a
 Kubernetes cluster involved, and this repo has a clean answer to one of
@@ -1668,7 +1674,7 @@ explicitly granted them. They're enforced by different code, at different
 layers, and mixing them up is exactly the confusion this chapter exists
 to clear up.
 
-## The application side: an API key, actually wired in
+### The application side: an API key, actually wired in
 
 Before adding anything, check what an anonymous request to `toy-api`
 could do:
@@ -1780,7 +1786,7 @@ was needed to demonstrate the actual point of this section: an
 unauthenticated write and an authenticated one are now provably different
 requests, not the same request either way.
 
-## The cluster side: RBAC, checked directly
+### The cluster side: RBAC, checked directly
 
 Cluster RBAC is a separate system, answering a separate question, and
 this repo's manifests never touch it -- no `Role`, no `RoleBinding`, no
@@ -1837,7 +1843,7 @@ cluster, because `kubectl auth can-i` and `curl`-ing an endpoint on
 `toy-api` are checking two unrelated permission systems that happen to
 share the word "auth."
 
-## On AWS: the same ServiceAccount does more work
+### On AWS: the same ServiceAccount does more work
 
 This repo targets minikube because minikube is free and local, not
 because minikube is the destination -- the eventual home for something
@@ -1911,7 +1917,7 @@ auditable choice, and the `default` ServiceAccount having nothing at all
 is still, on AWS as much as on minikube, what "nobody asked for anything"
 correctly looks like.
 
-## Where each one actually belongs
+### Where each one actually belongs
 
 The practical rule falls out of what got demonstrated above rather than
 needing to be stated as a separate principle: application auth belongs
@@ -1941,9 +1947,11 @@ nothing was ever asked for. A real operator sits somewhere in between,
 and getting that middle right is a RoleBinding written on purpose, not a
 default nobody thought about.
 
-# Git as the Control Plane
+# Part IV -- GitOps: Extending the Pattern into DevOps
 
-## The inversion
+## Git as the Control Plane
+
+### The inversion
 
 Every deployment so far in this book has been a push. `kubectl apply -f
 deployment.yaml` from Chapter 6 onward means: something outside the
@@ -1972,7 +1980,7 @@ propose a change that still has to pass through commit history and,
 ideally, review -- not silently reach into the cluster and start
 deleting things.
 
-## ArgoCD's loop is the same loop
+### ArgoCD's loop is the same loop
 
 This isn't a new idea bolted onto Kubernetes. It's Chapter 5's control
 loop, run one level up:
@@ -1996,7 +2004,7 @@ whose one job is polling an external system (git) instead of watching
 another API object, then reconciling exactly the way every other
 controller in this book already does.
 
-## Hands-on: this repo, deployed by ArgoCD, for real
+### Hands-on: this repo, deployed by ArgoCD, for real
 
 This book has a second cluster running alongside the minikube one from
 every earlier chapter -- a `kind` cluster, with ArgoCD installed, and a
@@ -2070,7 +2078,7 @@ cluster -- the only thing that changed was a file in a git repository,
 and a controller running inside the cluster noticed and closed the gap
 on its own.
 
-## What "the cluster is passive" actually buys
+### What "the cluster is passive" actually buys
 
 Push that a step further. Manually scale the same Deployment directly,
 bypassing git entirely, the way an incident responder under pressure
@@ -2122,9 +2130,9 @@ inversion this chapter opened with: the cluster no longer trusts
 whoever's holding a terminal. It trusts a git remote, continuously,
 whether or not anyone's watching.
 
-# Drift Detection and Self-Healing at the Fleet Level
+## Drift Detection and Self-Healing at the Fleet Level
 
-## Two settings, two very different outcomes
+### Two settings, two very different outcomes
 
 `selfHeal: true` was doing a lot of quiet work in the last chapter's
 demo -- the drift got corrected so fast that "cluster disagrees with
@@ -2163,7 +2171,7 @@ before they'd finished starting. With `selfHeal` off, the same manual
 scale just... works, and keeps working, indefinitely, exactly as if
 ArgoCD weren't involved at all.
 
-## The diff is there, even when nothing acts on it
+### The diff is there, even when nothing acts on it
 
 That's the part worth sitting with -- "nothing corrects it" is not the
 same as "nothing notices it." Force a refresh and ask ArgoCD what it
@@ -2206,7 +2214,7 @@ diff is scoped exactly to what actually drifted, which is what makes it
 usable: a real incident produces a real, specific diff, not a vague "something's
 off" alert.
 
-## A permanent diff, not a one-time audit
+### A permanent diff, not a one-time audit
 
 This is the distinction the chapter title is pointing at. A traditional
 audit is something that runs once, or on a schedule -- someone, or some
@@ -2270,7 +2278,7 @@ toy-api-8467757567-z5bsj   0/1     Running   0          5s
 Two replacement pods already coming up, seconds after a scale-down to
 one, with nobody touching `Sync` at all.
 
-## Even the control file can drift
+### Even the control file can drift
 
 This chapter's own demo turned up a real instance of the thing it's
 about, unplanned. `argocd-k8s-hack.yaml` -- the file in this repo that
@@ -2300,9 +2308,9 @@ against itself -- that boundary, and where responsibility for watching
 it actually sits, is worth remembering the next time something that's
 "supposed to be self-healing" turns out not to be.
 
-# Multi-Environment Deployment Without the Copy-Paste
+## Multi-Environment Deployment Without the Copy-Paste
 
-## Three environments, one template
+### Three environments, one template
 
 Everything so far in Part IV has been one Application watching one
 path in one repo. The `gitops-lab-envs` ApplicationSet sitting in the
@@ -2350,7 +2358,7 @@ loop-over-a-list mental model from Chapter 13, except the loop variable
 comes from scanning a directory tree instead of a hardcoded list, and
 the loop body is a YAML template instead of a function call.
 
-## What actually differs between them
+### What actually differs between them
 
 The template is identical across all three; what's not identical is what
 each directory contains. `dev`'s and `prod`'s copies of
@@ -2421,7 +2429,7 @@ matching `replicas: 1` / `2` / `3` in each directory's own manifest.
 Three separate namespaces, three separate Applications, all traceable
 back to one `ApplicationSet` object and a directory listing.
 
-## Why hand-maintained per-environment YAML rots
+### Why hand-maintained per-environment YAML rots
 
 The alternative to this is the thing every team eventually does by
 hand: copy `deployment.yaml` into a `staging` folder, copy it again into
@@ -2454,9 +2462,9 @@ kinds of change error-prone in the same way; splitting generator from
 template makes each kind of change exactly as easy as it should be, and
 no easier than it should be to accidentally miss.
 
-# Autoscaling on Real Signal: KEDA
+## Autoscaling on Real Signal: KEDA
 
-## What CPU can't see
+### What CPU can't see
 
 The Horizontal Pod Autoscaler's default signal is CPU utilization, and
 for a lot of workloads that's a reasonable proxy for "busy." It's a bad
@@ -2509,7 +2517,7 @@ API the HPA already knows how to consume. KEDA's actual contribution
 isn't a new autoscaler. It's a new, pluggable source of truth for the
 one Kubernetes already has.
 
-## Watching it scale from zero, for real
+### Watching it scale from zero, for real
 
 `keda-demo/worker.yaml` starts the `queue-worker` Deployment at
 `replicas: 0` on purpose -- there's nothing to consume when the queue is
@@ -2557,7 +2565,7 @@ backlog to justify it -- not because a human ran `kubectl scale`, and
 not because a CPU graph crossed a threshold that happened to correlate
 with load.
 
-## Scaling back to zero, and paying for the gap honestly
+### Scaling back to zero, and paying for the gap honestly
 
 The workers finish, the queue empties, and `cooldownPeriod: 60` in the
 `ScaledObject` means KEDA waits a full minute of confirmed-empty before
@@ -2609,9 +2617,9 @@ jobs, webhook processing, batch pipelines -- that "pay for actual work,
 not idle capacity" isn't a niche optimization. It's what the workload
 actually looks like, once the autoscaler is watching the right signal.
 
-# The Cost/Complexity Decision
+## The Cost/Complexity Decision
 
-## The same problem, three price points
+### The same problem, three price points
 
 Chapter 16's KEDA demo runs on a `kind` cluster on a laptop, and that's
 worth being honest about: this book has been demonstrating queue-driven
@@ -2624,7 +2632,7 @@ chapter is trying to head off is picking one because it's the most
 familiar or the most impressive, rather than because it matches what's
 actually being built.
 
-## Option A: single-box autoscaling
+### Option A: single-box autoscaling
 
 One machine, no cluster. `docker compose up --scale worker=N`, or a
 small hand-rolled watcher polling a queue and adjusting replica counts
@@ -2651,7 +2659,7 @@ that was never going to use Kubernetes' actual selling points -- Chapter
 9's argument again, this time applied specifically to autoscaling rather
 than to deployment in general.
 
-## Option B: AWS Auto Scaling Groups
+### Option B: AWS Auto Scaling Groups
 
 Skip Kubernetes, keep AWS. An SQS queue depth feeds a `TargetTrackingScaling`
 policy on an EC2 Auto Scaling Group -- structurally the same idea as
@@ -2681,7 +2689,7 @@ policy is tuned. Fine for a render farm where a job queued for two extra
 minutes doesn't matter. Wrong for anything answering requests in
 real time.
 
-## Option C: real EKS
+### Option C: real EKS
 
 Everything Chapter 16 demonstrated, minus the "on a free laptop cluster"
 part. A real EKS control plane is a flat $73 a month before a single
@@ -2704,7 +2712,7 @@ threshold, EKS is the bulldozer for the garden hole `REAL_EKS_DEPLOY.md`
 warns about -- it works, and it costs $200 a month more than a solution
 that would have worked just as well.
 
-## A decision framework, not a default answer
+### A decision framework, not a default answer
 
 None of these three options is the right one in general, and that's the
 actual point. The question worth asking, every time, is the same one
@@ -2721,9 +2729,9 @@ most impressive on a resume, is the whole decision -- everything else in
 this chapter is just making the actual numbers visible enough to make
 that match honestly.
 
-# Side Quests
+## Side Quests
 
-## EKS emulation on a home LAN
+### EKS emulation on a home LAN
 
 Chapter 17 put a real number on running EKS: $210-265 a month, whether
 or not anything's actually happening in the cluster. That's a real
@@ -2771,7 +2779,7 @@ the IRSA annotations, point at ECR. Everything written above the
 infrastructure layer -- every manifest in this book -- doesn't change
 at all.
 
-## Queue-based scaling as a portable pattern
+### Queue-based scaling as a portable pattern
 
 Chapter 16 built one specific instance of a much more general shape:
 a `ScaledObject` watching a queue, translating depth into replica count.
@@ -2823,9 +2831,11 @@ controller close the gap, and the source of the number driving that
 description turns out to be one of the least important things about the
 whole system.
 
-# GitOps Without a Cluster, Watched Live
+# Part V -- Beyond Kubernetes: Generalizing the Pattern
 
-## What Kubernetes was quietly supplying for free
+## GitOps Without a Cluster, Watched Live
+
+### What Kubernetes was quietly supplying for free
 
 Every reconciliation loop in this book so far -- the Deployment
 controller in Chapter 5, ArgoCD in Chapter 13, KEDA's HPA in Chapter 16
@@ -2846,7 +2856,7 @@ on independent schedules, with the actual apply mechanism -- Terraform,
 Pulumi, Compose, a bare SSH session to a Pi -- decided per target. Rather
 than read about it, run it.
 
-## Watching the loop notice a change, live
+### Watching the loop notice a change, live
 
 The demo stack is a small FastAPI app under Docker Compose. Start it the
 same way `DEMO.md` describes:
@@ -2916,10 +2926,10 @@ re-run early -- the watch loop is already running, on its own
 eight-second clock, and the next tick finds the change on its own:
 
 ```
-🔄 [2026-09-09 12:43:23] Running reconciliation...
+[2026-09-09 12:43:23] Running reconciliation...
 example-app: NO_CHANGE - stack already up to date
 
-🔄 [2026-09-09 12:43:31] Running reconciliation...
+[2026-09-09 12:43:31] Running reconciliation...
 example-app: CHANGED - stack updated successfully
 ```
 
@@ -2945,7 +2955,7 @@ one are the same operation as far as `apply()` is concerned, which is
 the same point Chapter 13 made about `git revert` being a real rollback
 mechanism rather than a separate feature to build.
 
-## A worthwhile honest gap, found by accident
+### A worthwhile honest gap, found by accident
 
 Running this demo cold, before making any deliberate change, actually
 turned up something worth knowing about rather than glossing over: an
@@ -2963,7 +2973,7 @@ what I last made it," only "did the desired state change since last
 time" -- and it's worth remembering the next time `NO_CHANGE` shows up
 somewhere unexpected.
 
-## The shared shape underneath all of it
+### The shared shape underneath all of it
 
 Every backend this reconciler supports -- Terraform, Pulumi,
 CloudFormation, Compose, plain SSH to a Pi -- implements the same three
@@ -2994,9 +3004,9 @@ same method a Terraform-backed or Pulumi-backed target would be running,
 on its own schedule, against its own git repo, with nothing about the
 wrapper loop needing to know or care which one it's talking to.
 
-# Design Decisions, and Why They Were Made That Way
+## Design Decisions, and Why They Were Made That Way
 
-## Why an ABC instead of a Protocol, checked live
+### Why an ABC instead of a Protocol, checked live
 
 `BackEnd` could have been written as a `typing.Protocol` instead of an
 `abc.ABC` -- structural typing instead of nominal, matching by shape
@@ -3055,7 +3065,7 @@ about Pulumi's typed classes catching a misspelled field before
 nicer," but "which one of these two choices catches the mistake before
 it reaches production instead of during it."
 
-## Why there's no `plan()` or dry-run method
+### Why there's no `plan()` or dry-run method
 
 The obvious instinct, coming from Terraform or Pulumi, is to split
 "check for drift" from "apply the fix" -- `plan()` then `apply()`, the
@@ -3083,7 +3093,7 @@ them structurally can't. Keeping refresh-or-not entirely inside each
 backend's own `apply()` means the interface never asks a question it
 already knows some answer will be "not applicable."
 
-## Why there's no built-in approval gate -- and where it actually goes
+### Why there's no built-in approval gate -- and where it actually goes
 
 A fully autonomous reconciler, no human in the loop by default, is a
 deliberate choice. Staging is where a backend's behavior gets vetted
@@ -3105,7 +3115,7 @@ A per-backend `dry_run` flag was always where a review gate belonged.
 Adding one later is building the thing the design already pointed at,
 not walking it back.
 
-## Why pull-vs-push and convergence stay on separate sides
+### Why pull-vs-push and convergence stay on separate sides
 
 Two more boundaries, and both come from the same rule: each decision
 belongs to exactly one layer. *When* to run, *how often*, and *what*
@@ -3126,7 +3136,7 @@ the lock to `(backend_name, target)` instead means independent targets
 tick independently, and `fcntl.flock` self-releases if the process dies,
 so there's no stale-lock cleanup logic anywhere to get wrong.
 
-## What actually ran, and what's sketched
+### What actually ran, and what's sketched
 
 Worth being as plain about this as Chapter 6 was about a bare
 StatefulSet's guarantees stopping at identity and storage: not every
@@ -3157,9 +3167,9 @@ target, is part of trusting the system -- not a footnote to leave out
 because it's less flattering than pretending everything's equally
 proven.
 
-# Credentials and Blast Radius
+## Credentials and Blast Radius
 
-## The reconciler's environment is the actual security boundary
+### The reconciler's environment is the actual security boundary
 
 `TerraformBackend.apply()` shells out to `terraform apply -auto-approve`.
 `PulumiBackend.apply()` shells out to `pulumi up --refresh -y`. Neither
@@ -3205,7 +3215,7 @@ machine turns that into a much narrower problem: compromising the target
 gets an attacker the target, not a standing set of credentials that can
 also touch everything else the wrapper manages.
 
-## Short-lived over static, for the same reason Chapter 12 gave
+### Short-lived over static, for the same reason Chapter 12 gave
 
 The other half of limiting blast radius is bounding how long a leaked
 credential stays useful. A static, long-lived AWS access key that leaks
@@ -3220,7 +3230,7 @@ human catches it. Preferring STS-style credentials over static keys
 exists to keep honest, applied to the credential layer instead of the
 state layer: don't let something stay trusted longer than it has to.
 
-## The exception that proves the rule
+### The exception that proves the rule
 
 `PiBackend` breaks this pattern entirely, on purpose, and the code shows
 exactly why the pattern doesn't apply there. Look at how it decides
@@ -3245,7 +3255,7 @@ about separate control machines exists specifically to protect
 credentials broader than the target itself. Where there's no such
 credential, there's nothing the rule is protecting.
 
-## The same split as Chapter 12, one layer up
+### The same split as Chapter 12, one layer up
 
 This chapter's actual question -- who can make the reconciler act
 against a given target -- is the same shape Chapter 12 drew between
@@ -3268,9 +3278,9 @@ chapter clearing up -- just with "git write access" standing in for
 "application auth," and "shell access to the control machine" standing
 in for "cluster RBAC."
 
-# Progressive Delivery Without New Abstractions
+## Progressive Delivery Without New Abstractions
 
-## Two targets, one repo, no new machinery
+### Two targets, one repo, no new machinery
 
 Staging tracks `:latest`. Production pins to a specific, already-validated
 tag. Both watch the same git repo -- `example-app/` -- and apply
@@ -3307,7 +3317,7 @@ state file, each reconciling on its own schedule against its own
 reconciler had to grow. It's two instances of a pattern that already
 existed, pointed at two files that happen to differ in one line.
 
-## Watching a real promotion happen
+### Watching a real promotion happen
 
 Start staging, applying `latest` for real:
 
@@ -3381,7 +3391,7 @@ promotion script read one state file and wrote one compose file, and the
 rest was the ordinary reconciliation loop this whole book has been
 watching, doing what it always does.
 
-## Two parallels, not one
+### Two parallels, not one
 
 This is Chapter 14's drift detection with a human-gated promotion step
 inserted where `selfHeal` would otherwise fire automatically -- staging
@@ -3401,7 +3411,7 @@ solves it with one recorded fact two environments both read from --
 different shape, same underlying complaint: nothing should be allowed to
 drift apart from what it's supposed to track without someone noticing.
 
-## The honest gap, demonstrated
+### The honest gap, demonstrated
 
 `last_recorded_sha` answers "what SHA did staging last successfully
 apply." It does not answer "is that still what's actually running on
@@ -3454,9 +3464,11 @@ re-checking that makes `selfHeal` trustworthy instead of just fast.
 Nothing in this reconciler does that automatically, and that's worth
 knowing rather than assuming away.
 
-# One Pattern, Three Substrates
+# Part VI -- Putting It Together
 
-## The same three verbs, every time
+## One Pattern, Three Substrates
+
+### The same three verbs, every time
 
 Twenty-two chapters, three genuinely different pieces of software --
 Docker Compose, Kubernetes plus ArgoCD, and a hand-rolled Python
@@ -3483,7 +3495,7 @@ The verbs never changed. What changed, chapter to chapter, was only ever
 where the loop lived, how often it ran, and what "observe" and "act"
 actually meant for the thing being managed.
 
-## What each substrate actually buys, side by side
+### What each substrate actually buys, side by side
 
 | | Docker Compose | Kubernetes + ArgoCD | `gitops_reconciler` |
 |---|---|---|---|
@@ -3503,7 +3515,7 @@ The table is a map of what each substrate is actually for, read the way
 Chapter 9 and Chapter 17 both insisted it be read: against a specific
 workload's specific needs, not as a ranking with Kubernetes at the top.
 
-## A checklist for a new project
+### A checklist for a new project
 
 Pulled together from Chapter 9's signals and Chapter 17's framework,
 because they were always asking the same question at two different
@@ -3546,9 +3558,9 @@ Answer these honestly for a real project, and the substrate mostly picks
 itself -- the same way it did, chapter by chapter, across every one of
 the twenty-two before this one.
 
-# What Still Isn't Covered
+## What Still Isn't Covered
 
-## The honest list
+### The honest list
 
 Chapter 2 set a principle early and asked the rest of this book to carry
 it: if it's not in git, it shouldn't be running. Twenty-three chapters
@@ -3597,7 +3609,7 @@ running in the cluster is actually the image that was built from
 reviewed source, the way SBOM generation and image signing (cosign,
 Sigstore) are meant to guarantee.
 
-## Where to actually go next
+### Where to actually go next
 
 None of these are exotic. Each one is a natural continuation of a
 chapter that's already been read, not a new subject dropped in cold --
@@ -3618,10 +3630,7 @@ were always two different jobs, and only the first one was this book's.
 \appendix
 ```
 
-# Command Reference
-
-Every command below was actually run somewhere in this book. The
-chapter number is where to find the fuller transcript and explanation.
+# Command Line Reference
 
 ## Docker / Docker Compose
 
@@ -3634,6 +3643,9 @@ chapter number is where to find the fuller transcript and explanation.
 | `docker compose -f <file> -p <project> ps` | List containers for a specific compose file/project pair | 19, 22 |
 | `docker compose up -d --scale <svc>=N` | Try to run N replicas of one service | 4 |
 | `docker compose down` | Stop and remove a project's containers and network | 4, 19 |
+
+A wonderful tool for analyzing the layers of a Docker image is Dive (https://github.com/wagoodman/dive).
+Highly recommended.
 
 ## kubectl: pods, deployments, and workloads
 
@@ -3783,9 +3795,9 @@ This book draws on three repositories, each anchoring a different part.
 
 | Repo | Anchors | What it actually is |
 |---|---|---|
-| `k8s-hack` | Parts I-IV (Chapters 1-18) | This book's own source, plus the toy API and Kubernetes manifests every hands-on chapter through Chapter 18 walks through directly |
-| `gitops-lab` | Part IV (Chapters 13-18) | A working kind + ArgoCD + Gitea setup: the `k8s-hack` Application, the `gitops-lab-envs` ApplicationSet, and the KEDA/RabbitMQ demo, all live and referenced with real command output |
-| `gitops_reconciler` | Part V (Chapters 19-22) | The backend-agnostic reconciler itself -- `BackEnd`, `ManagedTarget`, `tick()` -- plus the Compose demo and the staging/prod promotion example |
+| `github:wware/k8s-hack` | Parts I-IV (Chapters 1-18) | This book's own source, plus the toy API and Kubernetes manifests every hands-on chapter through Chapter 18 walks through directly |
+| `github:wware/gitops-lab` | Part IV (Chapters 13-18) | A working kind + ArgoCD + Gitea setup: the `k8s-hack` Application, the `gitops-lab-envs` ApplicationSet, and the KEDA/RabbitMQ demo, all live and referenced with real command output |
+| `github:wware/gitops_reconciler` | Part V (Chapters 19-22) | The backend-agnostic reconciler itself -- `BackEnd`, `ManagedTarget`, `tick()` -- plus the Compose demo and the staging/prod promotion example |
 
 **Suggested reading order**, if not reading start to finish: Parts I-III
 (Chapters 1-12) stand alone as a Kubernetes fundamentals course and don't

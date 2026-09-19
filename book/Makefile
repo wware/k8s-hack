@@ -18,7 +18,7 @@ $(PDF): $(SRC) $(PREAMBLE) $(AFTER_TITLE)
 		-o $(PDF) \
 		--pdf-engine=xelatex \
 		--from=markdown \
-		--top-level-division=chapter \
+		--top-level-division=part \
 		--number-sections \
 		--include-in-header=$(PREAMBLE) \
 		--include-before-body=$(AFTER_TITLE) \
