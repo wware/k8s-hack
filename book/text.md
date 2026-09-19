@@ -156,6 +156,28 @@ and keep desired counts correct, continuously, faster than any person
 could do it by hand. That something is the subject of the rest of this
 book.
 
+### Repository Map
+
+This book draws on three repositories, each anchoring a different part.
+
+| Repo | Anchors | What it actually is |
+|---|---|---|
+| `github:wware/k8s-hack` | Parts I-IV (Chapters 1-18) | This book's own source, plus the toy API and Kubernetes manifests every hands-on chapter through Chapter 18 walks through directly |
+| `github:wware/gitops-lab` | Part IV (Chapters 13-18) | A working kind + ArgoCD + Gitea setup: the `k8s-hack` Application, the `gitops-lab-envs` ApplicationSet, and the KEDA/RabbitMQ demo, all live and referenced with real command output |
+| `github:wware/gitops_reconciler` | Part V (Chapters 19-22) | The backend-agnostic reconciler -- `BackEnd`, `ManagedTarget`, `tick()` -- plus the Compose demo and the staging/prod promotion example |
+
+**Suggested reading order**, if not reading start to finish: Parts I-III
+(Chapters 1-12) stand alone as a Kubernetes fundamentals course and don't
+require either of the other two repos. Part IV (13-18) needs `gitops-lab`
+running to reproduce the transcripts, but its concepts build directly on
+Part III and shouldn't be read out of order relative to it. Part V (19-22)
+needs `gitops_reconciler` and stands mostly independent of Parts III-IV
+conceptually -- someone who only cares about GitOps outside Kubernetes
+could reasonably start at Chapter 19 after reading Chapters 1-2 and 5 for
+the control-loop framing, though the cross-references back to Chapters 12
+and 14 will land better having read those first. Part VI (23-24) and the
+appendices assume everything before them.
+
 ## The Security Case for Systematized Infrastructure
 
 ### Ad-hoc ops was always risky
@@ -3796,25 +3818,3 @@ Highly recommended.
 # Index
 
 \printindex
-
-# Repository Map
-
-This book draws on three repositories, each anchoring a different part.
-
-| Repo | Anchors | What it actually is |
-|---|---|---|
-| `github:wware/k8s-hack` | Parts I-IV (Chapters 1-18) | This book's own source, plus the toy API and Kubernetes manifests every hands-on chapter through Chapter 18 walks through directly |
-| `github:wware/gitops-lab` | Part IV (Chapters 13-18) | A working kind + ArgoCD + Gitea setup: the `k8s-hack` Application, the `gitops-lab-envs` ApplicationSet, and the KEDA/RabbitMQ demo, all live and referenced with real command output |
-| `github:wware/gitops_reconciler` | Part V (Chapters 19-22) | The backend-agnostic reconciler itself -- `BackEnd`, `ManagedTarget`, `tick()` -- plus the Compose demo and the staging/prod promotion example |
-
-**Suggested reading order**, if not reading start to finish: Parts I-III
-(Chapters 1-12) stand alone as a Kubernetes fundamentals course and don't
-require either of the other two repos. Part IV (13-18) needs `gitops-lab`
-running to reproduce the transcripts, but its concepts build directly on
-Part III and shouldn't be read out of order relative to it. Part V (19-22)
-needs `gitops_reconciler` and stands mostly independent of Parts III-IV
-conceptually -- someone who only cares about GitOps outside Kubernetes
-could reasonably start at Chapter 19 after reading Chapters 1-2 and 5 for
-the control-loop framing, though the cross-references back to Chapters 12
-and 14 will land better having read those first. Part VI (23-24) and the
-appendices assume everything before them.
